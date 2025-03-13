@@ -922,7 +922,7 @@ public:
                         const std::vector<float>& sigmas,
                         int start_merge_step,
                         SDCondition id_cond,
-                        sd_slg_params_t slg_params = {NULL, 0, 0, 0, 0},
+                        sd_slg_params_t slg_params = {NULL, 0, 0, 0, false},
                         sd_apg_params_t apg_params = {1, 0, 0, 0},
                         ggml_tensor* noise_mask    = nullptr) {
         std::vector<int> skip_layers(slg_params.skip_layers, slg_params.skip_layers + slg_params.skip_layers_count);
@@ -949,7 +949,7 @@ public:
         struct ggml_tensor* noised_input = ggml_dup_tensor(work_ctx, noise);
 
         bool has_unconditioned = cfg_scale != 1.0 && uncond.c_crossattn != NULL;
-        bool has_skiplayer     = slg_params.scale != 0.0 && skip_layers.size() > 0;
+        bool has_skiplayer     = (slg_params.scale != 0.0 || slg_params.slg_uncond) && skip_layers.size() > 0;
 
         // denoise wrapper
         struct ggml_tensor* out_cond   = ggml_dup_tensor(work_ctx, x);
@@ -961,7 +961,9 @@ public:
         }
         if (has_skiplayer) {
             if (sd_version_is_dit(version)) {
-                out_skip = ggml_dup_tensor(work_ctx, x);
+                if (slg_params.scale != 0.0) {
+                    out_skip = ggml_dup_tensor(work_ctx, x);
+                }
             } else {
                 has_skiplayer = false;
                 LOG_WARN("SLG is incompatible with %s models", model_version_to_str[version]);
@@ -970,7 +972,7 @@ public:
         struct ggml_tensor* denoised = ggml_dup_tensor(work_ctx, x);
 
         struct ggml_tensor* preview_tensor = NULL;
-        auto sd_preview_mode = sd_get_preview_mode();
+        auto sd_preview_mode               = sd_get_preview_mode();
         if (sd_preview_mode != SD_PREVIEW_NONE && sd_preview_mode != SD_PREVIEW_PROJ) {
             preview_tensor = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32,
                                                 (denoised->ne[0] * 8),
@@ -1040,6 +1042,8 @@ public:
                                          control_strength,
                                          &out_cond);
             }
+            int step_count         = sigmas.size();
+            bool is_skiplayer_step = has_skiplayer && step > (int)(slg_params.skip_layer_start * step_count) && step < (int)(slg_params.skip_layer_end * step_count);
 
             float* negative_data = NULL;
             if (has_unconditioned) {
@@ -1048,24 +1052,39 @@ public:
                     control_net->compute(n_threads, noised_input, control_hint, timesteps, uncond.c_crossattn, uncond.c_vector);
                     controls = control_net->controls;
                 }
-                diffusion_model->compute(n_threads,
-                                         noised_input,
-                                         timesteps,
-                                         uncond.c_crossattn,
-                                         uncond.c_concat,
-                                         uncond.c_vector,
-                                         guidance_tensor,
-                                         -1,
-                                         controls,
-                                         control_strength,
-                                         &out_uncond);
+                if (is_skiplayer_step && slg_params.slg_uncond) {
+                    LOG_DEBUG("Skipping layers at uncond step %d\n", step);
+                    diffusion_model->compute(n_threads,
+                                             noised_input,
+                                             timesteps,
+                                             uncond.c_crossattn,
+                                             uncond.c_concat,
+                                             uncond.c_vector,
+                                             guidance_tensor,
+                                             -1,
+                                             controls,
+                                             control_strength,
+                                             &out_uncond,
+                                             NULL,
+                                             skip_layers);
+                } else {
+                    diffusion_model->compute(n_threads,
+                                             noised_input,
+                                             timesteps,
+                                             uncond.c_crossattn,
+                                             uncond.c_concat,
+                                             uncond.c_vector,
+                                             guidance_tensor,
+                                             -1,
+                                             controls,
+                                             control_strength,
+                                             &out_uncond);
+                }
                 negative_data = (float*)out_uncond->data;
             }
 
-            int step_count         = sigmas.size();
-            bool is_skiplayer_step = has_skiplayer && step > (int)(slg_params.skip_layer_start * step_count) && step < (int)(slg_params.skip_layer_end * step_count);
             float* skip_layer_data = NULL;
-            if (is_skiplayer_step) {
+            if (is_skiplayer_step && slg_params.scale != 0.0) {
                 LOG_DEBUG("Skipping layers at step %d\n", step);
                 // skip layer (same as conditionned)
                 diffusion_model->compute(n_threads,
@@ -1153,7 +1172,7 @@ public:
                         latent_result = positive_data[i] + (cfg_scale - 1) * delta;
                     }
                 }
-                if (is_skiplayer_step) {
+                if (is_skiplayer_step && slg_params.scale != 0.0) {
                     latent_result = latent_result + (positive_data[i] - skip_layer_data[i]) * slg_params.scale;
                 }
                 // v = latent_result, eps = latent_result
@@ -1177,7 +1196,7 @@ public:
                 pretty_progress(step, (int)steps, (t1 - t0) / 1000000.f);
                 // LOG_INFO("step %d sampling completed taking %.2fs", step, (t1 - t0) * 1.0f / 1000000);
             }
-            auto sd_preview_cb = sd_get_preview_callback();
+            auto sd_preview_cb   = sd_get_preview_callback();
             auto sd_preview_mode = sd_get_preview_mode();
             if (sd_preview_cb != NULL) {
                 if (step % sd_get_preview_interval() == 0) {

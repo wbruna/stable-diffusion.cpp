@@ -140,6 +140,7 @@ typedef struct {
     float scale;
     float skip_layer_start;
     float skip_layer_end;
+    bool slg_uncond;
 } sd_slg_params_t;
 
 typedef void (*sd_log_cb_t)(enum sd_log_level_t level, const char* text, void* data);
