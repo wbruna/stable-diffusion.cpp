@@ -3,7 +3,7 @@
 
 #include "ggml_extend.hpp"
 
-#define LORA_GRAPH_SIZE 20480
+#define LORA_GRAPH_SIZE 40960
 
 struct LoraModel : public GGMLRunner {
     enum lora_t {
