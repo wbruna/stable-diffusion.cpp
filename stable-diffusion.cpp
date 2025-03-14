@@ -922,7 +922,7 @@ public:
                         const std::vector<float>& sigmas,
                         int start_merge_step,
                         SDCondition id_cond,
-                        sd_slg_params_t slg_params = {NULL, 0, 0, 0, false},
+                        sd_slg_params_t slg_params = {NULL, 0, 0, 0, 0, false},
                         sd_apg_params_t apg_params = {1, 0, 0, 0},
                         ggml_tensor* noise_mask    = nullptr) {
         std::vector<int> skip_layers(slg_params.skip_layers, slg_params.skip_layers + slg_params.skip_layers_count);
