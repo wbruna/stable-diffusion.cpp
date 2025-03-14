@@ -906,7 +906,6 @@ public:
         }
     }
 
-
     ggml_tensor* sample(ggml_context* work_ctx,
                         ggml_tensor* init_latent,
                         ggml_tensor* noise,
@@ -984,7 +983,7 @@ public:
         std::vector<float> apg_momentum_buffer;
         if (apg_params.momentum != 0)
             apg_momentum_buffer.resize((size_t)ggml_nelements(denoised));
-        
+
         auto denoise = [&](ggml_tensor* input, float sigma, int step) -> ggml_tensor* {
             if (step == 1) {
                 pretty_progress(0, (int)steps, 0);
