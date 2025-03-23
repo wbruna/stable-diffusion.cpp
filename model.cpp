@@ -16,6 +16,7 @@
 #include "ggml-cpu.h"
 #include "ggml.h"
 
+#include "imatrix.hpp"
 #include "stable-diffusion.h"
 
 #ifdef SD_USE_METAL
@@ -27,6 +28,8 @@
 #endif
 
 #define ST_HEADER_SIZE_LEN 8
+
+static IMatrixCollector* imatrix_collector = NULL;
 
 uint64_t read_u64(uint8_t* buffer) {
     // little endian
@@ -737,7 +740,8 @@ void convert_tensor(void* src,
                     void* dst,
                     ggml_type dst_type,
                     int nrows,
-                    int n_per_row) {
+                    int n_per_row,
+                    std::vector<float> imatrix = {}) {
     int n = nrows * n_per_row;
     if (src_type == dst_type) {
         size_t nbytes = n * ggml_type_size(src_type) / ggml_blck_size(src_type);
@@ -746,7 +750,10 @@ void convert_tensor(void* src,
         if (dst_type == GGML_TYPE_F16) {
             ggml_fp32_to_fp16_row((float*)src, (ggml_fp16_t*)dst, n);
         } else {
-            std::vector<float> imatrix(n_per_row, 1.0f);  // dummy importance matrix
+            // if(imatrix.size() != 0){
+            //     LOG_INFO("using imatrix");
+            // }
+            imatrix.resize(n_per_row, 1.0f);
             const float* im = imatrix.data();
             ggml_quantize_chunk(dst_type, (float*)src, dst, 0, nrows, n_per_row, im);
         }
@@ -776,7 +783,10 @@ void convert_tensor(void* src,
         if (dst_type == GGML_TYPE_F16) {
             ggml_fp32_to_fp16_row((float*)src_data_f32, (ggml_fp16_t*)dst, n);
         } else {
-            std::vector<float> imatrix(n_per_row, 1.0f);  // dummy importance matrix
+            // if(imatrix.size() != 0){
+            //     LOG_INFO("using imatrix");
+            // }
+            imatrix.resize(n_per_row, 1.0f);
             const float* im = imatrix.data();
             ggml_quantize_chunk(dst_type, (float*)src_data_f32, dst, 0, nrows, n_per_row, im);
         }
@@ -1830,8 +1840,12 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, ggml_backend
                         f8_e5m2_to_f16_vec((uint8_t*)read_buffer.data(), (uint16_t*)read_buffer.data(), tensor_storage.nelements());
                     }
 
+                    auto processed_name = convert_tensor_name(tensor_storage.name);
+                    // LOG_DEBUG("%s",processed_name.c_str());
+                    std::vector<float> imatrix = imatrix_collector ? imatrix_collector->get_values(processed_name) : std::vector<float>{};
+
                     convert_tensor((void*)read_buffer.data(), tensor_storage.type, dst_tensor->data,
-                                   dst_tensor->type, (int)tensor_storage.nelements() / (int)tensor_storage.ne[0], (int)tensor_storage.ne[0]);
+                                   dst_tensor->type, (int)tensor_storage.nelements() / (int)tensor_storage.ne[0], (int)tensor_storage.ne[0], imatrix);
                 }
             } else {
                 read_buffer.resize(tensor_storage.nbytes());
@@ -1853,6 +1867,10 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, ggml_backend
                     ggml_backend_tensor_set(dst_tensor, read_buffer.data(), 0, ggml_nbytes(dst_tensor));
                 } else {
                     // convert first, then copy to device memory
+                    auto processed_name = convert_tensor_name(tensor_storage.name);
+                    // LOG_DEBUG("%s",processed_name.c_str());
+                    std::vector<float> imatrix = imatrix_collector ? imatrix_collector->get_values(processed_name) : std::vector<float>{};
+
                     convert_buffer.resize(ggml_nbytes(dst_tensor));
                     convert_tensor((void*)read_buffer.data(), tensor_storage.type,
                                    (void*)convert_buffer.data(), dst_tensor->type,
@@ -2054,6 +2072,10 @@ int64_t ModelLoader::get_params_mem_size(ggml_backend_t backend, ggml_type type)
     return mem_size;
 }
 
+void setConvertImatrixCollector(void* collector) {
+    imatrix_collector = ((IMatrixCollector*)collector);
+}
+
 bool convert(const char* input_path, const char* vae_path, const char* output_path, sd_type_t output_type) {
     ModelLoader model_loader;
 
@@ -2068,6 +2090,7 @@ bool convert(const char* input_path, const char* vae_path, const char* output_pa
             return false;
         }
     }
+
     bool success = model_loader.save_to_gguf_file(output_path, (ggml_type)output_type);
     return success;
 }

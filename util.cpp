@@ -251,6 +251,9 @@ static sd_preview_cb_t sd_preview_cb = NULL;
 sd_preview_t sd_preview_mode         = SD_PREVIEW_NONE;
 int sd_preview_interval              = 1;
 
+static ggml_graph_eval_callback callback_eval = NULL;
+void * callback_eval_user_data = NULL;
+
 std::u32string utf8_to_utf32(const std::string& utf8_str) {
     std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
     return converter.from_bytes(utf8_str);
@@ -447,6 +450,20 @@ sd_progress_cb_t sd_get_progress_callback() {
 void* sd_get_progress_callback_data() {
     return sd_progress_cb_data;
 }
+
+void sd_set_backend_eval_callback(ggml_graph_eval_callback cb, void * data){
+    callback_eval = cb;
+    callback_eval_user_data = data;
+}
+
+ggml_graph_eval_callback get_callback_eval(){
+    return callback_eval;
+}
+
+void* get_callback_eval_user_data() {
+    return callback_eval_user_data;
+}
+
 const char* sd_get_system_info() {
     static char buffer[1024];
     std::stringstream ss;

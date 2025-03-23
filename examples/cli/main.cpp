@@ -22,6 +22,10 @@
 #define STB_IMAGE_RESIZE_STATIC
 #include "stb_image_resize.h"
 
+#define IMATRIX_IMPL
+#include "imatrix.hpp"
+static IMatrixCollector g_collector;
+
 const char* rng_type_to_str[] = {
     "std_default",
     "cuda",
@@ -147,6 +151,12 @@ struct SDParams {
     int preview_interval        = 1;
     std::string preview_path    = "preview.png";
     bool taesd_preview          = false;
+
+    /* Imatrix params */
+
+    std::string imatrix_out = "";
+
+    std::vector<std::string> imatrix_in = {};
 };
 
 void print_params(SDParams params) {
@@ -225,6 +235,8 @@ void print_usage(int argc, const char* argv[]) {
     printf("  --upscale-repeats                  Run the ESRGAN upscaler this many times (default 1)\n");
     printf("  --type [TYPE]                      weight type (examples: f32, f16, q4_0, q4_1, q5_0, q5_1, q8_0, q2_K, q3_K, q4_K)\n");
     printf("                                     If not specified, the default is the type of the weight file\n");
+    printf("  --imat-out [PATH]                  If set, compute the imatrix for this run and save it to the provided path");
+    printf("  --imat-in [PATH]                   Use imatrix for quantization.");
     printf("  --lora-model-dir [DIR]             lora model directory\n");
     printf("  -i, --init-img [IMAGE]             path to the input image, required by img2img\n");
     printf("  --mask [MASK]                      path to the mask image, required by img2img with mask\n");
@@ -719,6 +731,18 @@ void parse_args(int argc, const char** argv, SDParams& params) {
                 break;
             }
             params.preview_path = argv[i];
+        } else if (arg == "--imat-out") {
+            if (++i >= argc) {
+                invalid_arg = true;
+                break;
+            }
+            params.imatrix_out = argv[i];
+        } else if (arg == "--imat-in") {
+            if (++i >= argc) {
+                invalid_arg = true;
+                break;
+            }
+            params.imatrix_in.push_back(std::string(argv[i]));
         } else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
             print_usage(argc, argv);
@@ -896,6 +920,10 @@ void step_callback(int step, sd_image_t image) {
     stbi_write_png(preview_path, image.width, image.height, image.channel, image.data, 0);
 }
 
+static bool collect_imatrix(struct ggml_tensor* t, bool ask, void* user_data) {
+    return g_collector.collect_imatrix(t, ask, user_data);
+}
+
 int main(int argc, const char* argv[]) {
     SDParams params;
 
@@ -908,6 +936,19 @@ int main(int argc, const char* argv[]) {
     if (params.verbose) {
         print_params(params);
         printf("%s", sd_get_system_info());
+    }
+
+    if (params.imatrix_out != "") {
+        sd_set_backend_eval_callback((sd_graph_eval_callback_t)collect_imatrix, &params);
+    }
+    if (params.imatrix_out != "" || params.mode == CONVERT || params.wtype != SD_TYPE_COUNT) {
+        setConvertImatrixCollector((void*)&g_collector);
+        for (const auto& in_file : params.imatrix_in) {
+            printf("loading imatrix from '%s'\n", in_file.c_str());
+            if (!g_collector.load_imatrix(in_file.c_str())) {
+                printf("Failed to load %s\n", in_file.c_str());
+            }
+        }
     }
 
     if (params.mode == CONVERT) {
@@ -1232,6 +1273,9 @@ int main(int argc, const char* argv[]) {
         }
         free(results[i].data);
         results[i].data = NULL;
+    }
+    if (params.imatrix_out != "") {
+        g_collector.save_imatrix(params.imatrix_out);
     }
     free(results);
     free_sd_ctx(sd_ctx);
