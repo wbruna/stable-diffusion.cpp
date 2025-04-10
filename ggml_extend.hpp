@@ -23,8 +23,8 @@
 #include "ggml-alloc.h"
 #include "ggml-backend.h"
 #include "ggml-cpu.h"
-#include "ggml/src/ggml-impl.h"
 #include "ggml.h"
+#include "ggml/src/ggml-impl.h"
 
 #include "model.h"
 #include "util.h"
@@ -115,7 +115,8 @@ __STATIC_INLINE__ struct ggml_tensor* ggml_kronecker(ggml_context* ctx, struct g
                                      a->ne[0] * b->ne[0],
                                      a->ne[1] * b->ne[1],
                                      a->ne[2] * b->ne[2],
-                                     a->ne[3] * b->ne[3]),
+                                     a->ne[3] * b->ne[3],
+                                     GGML_SCALE_MODE_NEAREST),
                     b);
 }
 
@@ -1308,33 +1309,33 @@ public:
         }
 
         auto callback_eval = get_callback_eval();
-        
-        if(!callback_eval){
+
+        if (!callback_eval) {
             ggml_backend_graph_compute(backend, gf);
-        }else{
-            void * callback_eval_user_data = get_callback_eval_user_data();
+        } else {
+            void* callback_eval_user_data = get_callback_eval_user_data();
             for (int j0 = 0; j0 < gf->n_nodes; j0++) {
-                struct ggml_tensor * t = gf->nodes[j0];
-                
+                struct ggml_tensor* t = gf->nodes[j0];
+
                 // check if the user needs data from this node
                 bool need = callback_eval(t, true, callback_eval_user_data);
-                
+
                 int j1 = j0;
-                
+
                 // determine the range [j0, j1] of nodes that can be computed together
                 while (!need && j1 < gf->n_nodes - 1) {
-                    t = gf->nodes[++j1];
+                    t    = gf->nodes[++j1];
                     need = callback_eval(t, true, callback_eval_user_data);
                 }
-                
+
                 struct ggml_cgraph gv = ggml_graph_view(gf, j0, j1 + 1);
-                
+
                 ggml_backend_graph_compute_async(backend, &gv);
-                
+
                 if (need && !callback_eval(t, false, callback_eval_user_data)) {
                     break;
                 }
-                
+
                 j0 = j1;
             }
             ggml_backend_synchronize(backend);
