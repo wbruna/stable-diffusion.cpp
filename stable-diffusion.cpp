@@ -29,6 +29,7 @@
 const char* model_version_to_str[] = {
     "SD 1.x",
     "SD 1.x Inpaint",
+    "Instruct-Pix2Pix",
     "SD 2.x",
     "SD 2.x Inpaint",
     "SDXL",
@@ -843,7 +844,7 @@ public:
         uint32_t height        = latents->ne[1];
         uint32_t dim           = latents->ne[2];
         if (preview_mode == SD_PREVIEW_PROJ) {
-            const float(*latent_rgb_proj)[channel];
+            const float (*latent_rgb_proj)[channel];
 
             if (dim == 16) {
                 // 16 channels VAE -> Flux or SD3
@@ -951,6 +952,9 @@ public:
                         ggml_tensor* noise_mask    = nullptr) {
         std::vector<int> skip_layers(slg_params.skip_layers, slg_params.skip_layers + slg_params.skip_layers_count);
 
+
+        // TODO (Pix2Pix): double conditioning for prompt and image
+        
         LOG_DEBUG("Sample");
         struct ggml_init_params params;
         size_t data_size = ggml_row_size(init_latent->type, init_latent->ne[0]);
@@ -1670,9 +1674,16 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
         }
         cond.c_concat   = masked_image;
         uncond.c_concat = masked_image;
+        // noise_mask = masked_image;
+    } else if (sd_ctx->sd->version == VERSION_INSTRUCT_PIX2PIX) {
+        cond.c_concat  = masked_image;
+        auto empty_img = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, masked_image->ne[0], masked_image->ne[1], masked_image->ne[2], masked_image->ne[3]);
+        ggml_set_f32(empty_img, 0);
+        uncond.c_concat = empty_img;
     } else {
         noise_mask = masked_image;
     }
+
     for (int b = 0; b < batch_count; b++) {
         int64_t sampling_start = ggml_time_ms();
         int64_t cur_seed       = seed + b;
@@ -1977,6 +1988,14 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
                     }
                 }
             }
+        }
+    } else if (sd_ctx->sd->version == VERSION_INSTRUCT_PIX2PIX) {
+        // Not actually masked, we're just highjacking the masked_image variable since it will be used the same way
+        if (!sd_ctx->sd->use_tiny_autoencoder) {
+            ggml_tensor* moments = sd_ctx->sd->encode_first_stage(work_ctx, init_img);
+            masked_image         = sd_ctx->sd->get_first_stage_encoding(work_ctx, moments);
+        } else {
+            masked_image = sd_ctx->sd->encode_first_stage(work_ctx, init_img);
         }
     } else {
         // LOG_WARN("Inpainting with a base model is not great");
