@@ -1169,11 +1169,14 @@ public:
                     float delta;
                     if (has_img_guidance) {
                         if (has_unconditioned) {
+                            // 2-conditioning CFG (img_cfg_scale != cfg_scale != 1)
                             delta = positive_data[i] + (negative_data[i] * (1 - img_cfg_scale) + img_cond_data[i] * (img_cfg_scale - cfg_scale)) / (cfg_scale - 1);
                         } else {
-                            delta = img_cond_data[i] - negative_data[i];
+                            // pure img CFG (img_cfg_scale == 1, cfg_scale !=1)
+                            delta = positive_data[i] - img_cond_data[i];
                         }
                     } else {
+                        // classic CFG (img_cfg_scale == cfg_scale != 1)
                         delta = positive_data[i] - negative_data[i];
                     }
                     if (apg_params.momentum != 0) {
