@@ -955,6 +955,10 @@ public:
         // TODO (Pix2Pix): separate image guidance params (right now it's reusing distilled guidance)
 
         float img_cfg_scale = guidance;
+        if (img_cfg_scale != cfg_scale && !sd_version_use_concat(version)) {
+            LOG_WARN("2-conditioning CFG is not supported with this model, disabling it...");
+            img_cfg_scale = cfg_scale;
+        }
 
         LOG_DEBUG("Sample");
         struct ggml_init_params params;
@@ -977,8 +981,8 @@ public:
 
         struct ggml_tensor* noised_input = ggml_dup_tensor(work_ctx, noise);
 
-        bool has_unconditioned = cfg_scale != 1.0 && uncond.c_crossattn != NULL;
-        bool has_img_guidance  = version == VERSION_INSTRUCT_PIX2PIX && cfg_scale != img_cfg_scale;
+        bool has_unconditioned = img_cfg_scale != 1.0 && uncond.c_crossattn != NULL;
+        bool has_img_guidance  = cfg_scale != img_cfg_scale && uncond.c_crossattn != NULL;
         bool has_skiplayer     = (slg_params.scale != 0.0 || slg_params.slg_uncond) && skip_layers.size() > 0;
 
         // denoise wrapper
@@ -987,7 +991,7 @@ public:
         struct ggml_tensor* out_skip     = NULL;
         struct ggml_tensor* out_img_cond = NULL;
 
-        if (has_unconditioned || has_img_guidance) {
+        if (has_unconditioned) {
             out_uncond = ggml_dup_tensor(work_ctx, x);
         }
         if (has_skiplayer) {
@@ -1080,7 +1084,7 @@ public:
             bool is_skiplayer_step = has_skiplayer && step > (int)(slg_params.skip_layer_start * step_count) && step < (int)(slg_params.skip_layer_end * step_count);
 
             float* negative_data = NULL;
-            if (has_unconditioned || has_img_guidance) {
+            if (has_unconditioned) {
                 // uncond
                 if (control_hint != NULL) {
                     control_net->compute(n_threads, noised_input, control_hint, timesteps, uncond.c_crossattn, uncond.c_vector);
