@@ -979,7 +979,6 @@ public:
 
         bool has_unconditioned = cfg_scale != 1.0 && uncond.c_crossattn != NULL;
         bool has_img_guidance  = version == VERSION_INSTRUCT_PIX2PIX && cfg_scale != img_cfg_scale;
-        has_unconditioned      = has_unconditioned ||has_img_guidance;
         bool has_skiplayer     = (slg_params.scale != 0.0 || slg_params.slg_uncond) && skip_layers.size() > 0;
 
         // denoise wrapper
@@ -988,7 +987,7 @@ public:
         struct ggml_tensor* out_skip     = NULL;
         struct ggml_tensor* out_img_cond = NULL;
 
-        if (has_unconditioned) {
+        if (has_unconditioned || has_img_guidance) {
             out_uncond = ggml_dup_tensor(work_ctx, x);
         }
         if (has_skiplayer) {
@@ -1081,7 +1080,7 @@ public:
             bool is_skiplayer_step = has_skiplayer && step > (int)(slg_params.skip_layer_start * step_count) && step < (int)(slg_params.skip_layer_end * step_count);
 
             float* negative_data = NULL;
-            if (has_unconditioned) {
+            if (has_unconditioned || has_img_guidance) {
                 // uncond
                 if (control_hint != NULL) {
                     control_net->compute(n_threads, noised_input, control_hint, timesteps, uncond.c_crossattn, uncond.c_vector);
@@ -1169,7 +1168,11 @@ public:
                 for (int i = 0; i < ne_elements; i++) {
                     float delta;
                     if (has_img_guidance) {
-                        delta = positive_data[i] + (negative_data[i] * (1 - img_cfg_scale) + img_cond_data[i] * (img_cfg_scale - cfg_scale)) / (cfg_scale - 1);
+                        if (has_unconditioned) {
+                            delta = positive_data[i] + (negative_data[i] * (1 - img_cfg_scale) + img_cond_data[i] * (img_cfg_scale - cfg_scale)) / (cfg_scale - 1);
+                        } else {
+                            delta = img_cond_data[i] - negative_data[i];
+                        }
                     } else {
                         delta = positive_data[i] - negative_data[i];
                     }
@@ -1227,6 +1230,9 @@ public:
 
                         latent_result = positive_data[i] + (cfg_scale - 1) * delta;
                     }
+                } else if (has_img_guidance) {
+                    float delta   = deltas[i];
+                    latent_result = positive_data[i] + (img_cfg_scale - 1) * delta;
                 }
                 if (is_skiplayer_step && slg_params.scale != 0.0) {
                     latent_result = latent_result + (positive_data[i] - skip_layer_data[i]) * slg_params.scale;
@@ -1633,7 +1639,7 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
                                                                            sd_ctx->sd->diffusion_model->get_adm_in_channels());
 
     SDCondition uncond;
-    if (cfg_scale != 1.0) {
+    if (cfg_scale != 1.0 || sd_ctx->sd->version == VERSION_INSTRUCT_PIX2PIX && cfg_scale != guidance) {
         bool force_zero_embeddings = false;
         if (sd_version_is_sdxl(sd_ctx->sd->version) && negative_prompt.size() == 0) {
             force_zero_embeddings = true;
@@ -1974,6 +1980,14 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
 
     ggml_tensor* masked_image;
 
+    ggml_tensor* init_latent = NULL;
+    if (!sd_ctx->sd->use_tiny_autoencoder) {
+        ggml_tensor* moments = sd_ctx->sd->encode_first_stage(work_ctx, init_img);
+        init_latent          = sd_ctx->sd->get_first_stage_encoding(work_ctx, moments);
+    } else {
+        init_latent = sd_ctx->sd->encode_first_stage(work_ctx, init_img);
+    }
+
     if (sd_version_is_inpaint(sd_ctx->sd->version)) {
         int64_t mask_channels = 1;
         if (sd_ctx->sd->version == VERSION_FLUX_FILL) {
@@ -2019,12 +2033,7 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
         }
     } else if (sd_ctx->sd->version == VERSION_INSTRUCT_PIX2PIX) {
         // Not actually masked, we're just highjacking the masked_image variable since it will be used the same way
-        if (!sd_ctx->sd->use_tiny_autoencoder) {
-            ggml_tensor* moments = sd_ctx->sd->encode_first_stage(work_ctx, init_img);
-            masked_image         = sd_ctx->sd->get_first_stage_encoding(work_ctx, moments);
-        } else {
-            masked_image = sd_ctx->sd->encode_first_stage(work_ctx, init_img);
-        }
+        masked_image = init_latent;
     } else {
         // LOG_WARN("Inpainting with a base model is not great");
         masked_image = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, width / 8, height / 8, 1, 1);
@@ -2036,14 +2045,6 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
                 ggml_tensor_set_f32(masked_image, m, ix, iy);
             }
         }
-    }
-
-    ggml_tensor* init_latent = NULL;
-    if (!sd_ctx->sd->use_tiny_autoencoder) {
-        ggml_tensor* moments = sd_ctx->sd->encode_first_stage(work_ctx, init_img);
-        init_latent          = sd_ctx->sd->get_first_stage_encoding(work_ctx, moments);
-    } else {
-        init_latent = sd_ctx->sd->encode_first_stage(work_ctx, init_img);
     }
 
     print_ggml_tensor(init_latent, true);
