@@ -1226,7 +1226,7 @@ public:
 
             for (int i = 0; i < ne_elements; i++) {
                 float latent_result = positive_data[i];
-                if (has_unconditioned) {
+                if (has_unconditioned || has_img_guidance) {
                     // out_uncond + cfg_scale * (out_cond - out_uncond)
                     int64_t ne3 = out_cond->ne[3];
                     if (min_cfg != cfg_scale && ne3 != 1) {
@@ -1237,9 +1237,6 @@ public:
 
                         latent_result = positive_data[i] + (cfg_scale - 1) * delta;
                     }
-                } else if (has_img_guidance) {
-                    float delta   = deltas[i];
-                    latent_result = positive_data[i] + (img_cfg_scale - 1) * delta;
                 }
                 if (is_skiplayer_step && slg_params.scale != 0.0) {
                     latent_result = latent_result + (positive_data[i] - skip_layer_data[i]) * slg_params.scale;
@@ -2016,7 +2013,7 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
     ggml_tensor* init_moments = NULL;
     if (!sd_ctx->sd->use_tiny_autoencoder) {
         init_moments = sd_ctx->sd->encode_first_stage(work_ctx, init_img);
-        init_latent               = sd_ctx->sd->get_first_stage_encoding(work_ctx, init_moments);
+        init_latent  = sd_ctx->sd->get_first_stage_encoding(work_ctx, init_moments);
     } else {
         init_latent = sd_ctx->sd->encode_first_stage(work_ctx, init_img);
     }
