@@ -37,6 +37,7 @@ const char* model_version_to_str[] = {
     "SDXL Instruct-Pix2Pix",
     "SVD",
     "SD3.x",
+    "SD3 Instruct-Pix2Pix",
     "Flux",
     "Flux Fill"};
 

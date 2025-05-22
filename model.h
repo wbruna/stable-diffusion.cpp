@@ -29,6 +29,7 @@ enum SDVersion {
     VERSION_SDXL_PIX2PIX,
     VERSION_SVD,
     VERSION_SD3,
+    VERSION_SD3_PIX2PIX,
     VERSION_FLUX,
     VERSION_FLUX_FILL,
     VERSION_COUNT,
@@ -42,7 +43,7 @@ static inline bool sd_version_is_flux(SDVersion version) {
 }
 
 static inline bool sd_version_is_sd3(SDVersion version) {
-    if (version == VERSION_SD3) {
+    if (version == VERSION_SD3 || version == VERSION_SD3_PIX2PIX) {
         return true;
     }
     return false;
@@ -84,7 +85,7 @@ static inline bool sd_version_is_dit(SDVersion version) {
 }
 
 static inline bool sd_version_is_edit(SDVersion version) {
-    return version == VERSION_SD1_PIX2PIX || version == VERSION_SDXL_PIX2PIX;
+    return version == VERSION_SD1_PIX2PIX || version == VERSION_SDXL_PIX2PIX  || version == VERSION_SD3_PIX2PIX;
 }
 
 static bool sd_version_use_concat(SDVersion version) {

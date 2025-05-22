@@ -1625,9 +1625,10 @@ SDVersion ModelLoader::get_sd_version() {
     bool is_unet               = false;
 
     bool is_xl   = false;
+    bool is_sd3  = false;
     bool is_flux = false;
 
-#define found_family (is_xl || is_flux)
+#define found_family (is_xl || is_flux || is_sd3)
     for (auto& tensor_storage : tensor_storages) {
         if (!found_family) {
             if (tensor_storage.name.find("model.diffusion_model.double_blocks.") != std::string::npos) {
@@ -1637,7 +1638,10 @@ SDVersion ModelLoader::get_sd_version() {
                 }
             }
             if (tensor_storage.name.find("model.diffusion_model.joint_blocks.") != std::string::npos) {
-                return VERSION_SD3;
+                is_sd3 = true;
+                if (input_block_checked) {
+                    break;
+                }
             }
             if (tensor_storage.name.find("model.diffusion_model.input_blocks.") != std::string::npos) {
                 is_unet = true;
@@ -1678,8 +1682,17 @@ SDVersion ModelLoader::get_sd_version() {
             }
         }
     }
+
     bool is_inpaint = input_block_weight.ne[2] == 9;
     bool is_ip2p    = input_block_weight.ne[2] == 8;
+    if (is_sd3) {
+        is_ip2p = input_block_weight.ne[0] == 32;
+        if (is_ip2p) {
+            return VERSION_SD3_PIX2PIX;
+        }
+        return VERSION_SD3;
+    }
+
     if (is_xl) {
         if (is_inpaint) {
             return VERSION_SDXL_INPAINT;
