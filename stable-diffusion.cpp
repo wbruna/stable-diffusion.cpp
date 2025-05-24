@@ -964,7 +964,7 @@ public:
                         SDCondition id_cond,
                         sd_slg_params_t slg_params = {NULL, 0, 0, 0, 0, false},
                         sd_apg_params_t apg_params = {1, 0, 0, 0},
-                        ggml_tensor* noise_mask    = nullptr) {
+                        ggml_tensor* denoise_mask    = NULL) {
         std::vector<int> skip_layers(slg_params.skip_layers, slg_params.skip_layers + slg_params.skip_layers_count);
 
         // TODO (Pix2Pix): separate image guidance params (right now it's reusing distilled guidance)
@@ -1261,10 +1261,10 @@ public:
                 vec_denoised[i] = latent_result * c_out + vec_input[i] * c_skip;
             }
             int64_t t1 = ggml_time_us();
-            if (noise_mask != nullptr) {
+            if (denoise_mask != nullptr) {
                 for (int64_t x = 0; x < denoised->ne[0]; x++) {
                     for (int64_t y = 0; y < denoised->ne[1]; y++) {
-                        float mask = ggml_tensor_get_f32(noise_mask, x, y);
+                        float mask = ggml_tensor_get_f32(denoise_mask, x, y);
                         for (int64_t k = 0; k < denoised->ne[2]; k++) {
                             float init = ggml_tensor_get_f32(init_latent, x, y, k);
                             float den  = ggml_tensor_get_f32(denoised, x, y, k);
@@ -1534,7 +1534,8 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
                            std::string input_id_images_path,
                            sd_slg_params_t slg_params,
                            sd_apg_params_t apg_params,
-                           ggml_tensor* masked_latent = NULL) {
+                           ggml_tensor* concat_latent = NULL,
+                           ggml_tensor* denoise_mask  = NULL) {
     if (seed < 0) {
         // Generally, when using the provided command line, the seed is always >0.
         // However, to prevent potential issues if 'stable-diffusion.cpp' is invoked as a library
@@ -1721,7 +1722,6 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
     int W = width / 8;
     int H = height / 8;
     LOG_INFO("sampling using %s method", sampling_methods_str[sample_method]);
-    ggml_tensor* noise_mask = nullptr;
     if (sd_version_is_inpaint(sd_ctx->sd->version)) {
         int64_t mask_channels = 1;
         if (sd_ctx->sd->version == VERSION_FLUX_FILL) {
@@ -1747,19 +1747,17 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
                 }
             }
         }
-        if (masked_latent == NULL) {
-            masked_latent = empty_latent;
+        if (concat_latent == NULL) {
+            concat_latent = empty_latent;
         }
-        cond.c_concat   = masked_latent;
+        cond.c_concat   = concat_latent;
         uncond.c_concat = empty_latent;
-        // noise_mask = masked_latent;
+        denoise_mask    = NULL;
     } else if (sd_version_is_edit(sd_ctx->sd->version)) {
-        cond.c_concat     = masked_latent;
-        auto empty_latent = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, masked_latent->ne[0], masked_latent->ne[1], masked_latent->ne[2], masked_latent->ne[3]);
+        cond.c_concat     = concat_latent;
+        auto empty_latent = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, concat_latent->ne[0], concat_latent->ne[1], concat_latent->ne[2], concat_latent->ne[3]);
         ggml_set_f32(empty_latent, 0);
         uncond.c_concat = empty_latent;
-    } else {
-        noise_mask = masked_latent;
     }
 
     for (int b = 0; b < batch_count; b++) {
@@ -1797,7 +1795,7 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
                                                      id_cond,
                                                      slg_params,
                                                      apg_params,
-                                                     noise_mask);
+                                                     denoise_mask);
 
         // struct ggml_tensor* x_0 = load_tensor_from_file(ctx, "samples_ddim.bin");
         // print_ggml_tensor(x_0);
@@ -1947,7 +1945,7 @@ sd_image_t* txt2img(sd_ctx_t* sd_ctx,
                                                input_id_images_path_c_str,
                                                slg_params,
                                                apg_params,
-                                               NULL);
+                                               NULL, NULL);
 
     size_t t1 = ggml_time_ms();
 
@@ -2022,7 +2020,8 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
 
     sd_image_to_tensor(init_image.data, init_img);
 
-    ggml_tensor* masked_latent;
+    ggml_tensor* concat_latent;
+    ggml_tensor* denoise_mask = NULL;
 
     ggml_tensor* init_latent  = NULL;
     ggml_tensor* init_moments = NULL;
@@ -2049,7 +2048,7 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
         } else {
             masked_latent_0 = sd_ctx->sd->encode_first_stage(work_ctx, masked_img);
         }
-        masked_latent = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, masked_latent_0->ne[0], masked_latent_0->ne[1], mask_channels + masked_latent_0->ne[2], 1);
+        concat_latent = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, masked_latent_0->ne[0], masked_latent_0->ne[1], mask_channels + masked_latent_0->ne[2], 1);
         for (int ix = 0; ix < masked_latent_0->ne[0]; ix++) {
             for (int iy = 0; iy < masked_latent_0->ne[1]; iy++) {
                 int mx = ix * 8;
@@ -2057,7 +2056,7 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
                 if (sd_ctx->sd->version == VERSION_FLUX_FILL) {
                     for (int k = 0; k < masked_latent_0->ne[2]; k++) {
                         float v = ggml_tensor_get_f32(masked_latent_0, ix, iy, k);
-                        ggml_tensor_set_f32(masked_latent, v, ix, iy, k);
+                        ggml_tensor_set_f32(concat_latent, v, ix, iy, k);
                     }
                     // "Encode" 8x8 mask chunks into a flattened 1x64 vector, and concatenate to masked image
                     for (int x = 0; x < 8; x++) {
@@ -2065,40 +2064,41 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
                             float m = ggml_tensor_get_f32(mask_img, mx + x, my + y);
                             // TODO: check if the way the mask is flattened is correct (is it supposed to be x*8+y or x+8*y?)
                             // python code was using "b (h 8) (w 8) -> b (8 8) h w"
-                            ggml_tensor_set_f32(masked_latent, m, ix, iy, masked_latent_0->ne[2] + x * 8 + y);
+                            ggml_tensor_set_f32(concat_latent, m, ix, iy, masked_latent_0->ne[2] + x * 8 + y);
                         }
                     }
                 } else {
                     float m = ggml_tensor_get_f32(mask_img, mx, my);
-                    ggml_tensor_set_f32(masked_latent, m, ix, iy, 0);
+                    ggml_tensor_set_f32(concat_latent, m, ix, iy, 0);
                     for (int k = 0; k < masked_latent_0->ne[2]; k++) {
                         float v = ggml_tensor_get_f32(masked_latent_0, ix, iy, k);
-                        ggml_tensor_set_f32(masked_latent, v, ix, iy, k + mask_channels);
+                        ggml_tensor_set_f32(concat_latent, v, ix, iy, k + mask_channels);
                     }
                 }
             }
         }
-    } else if (sd_version_is_edit(sd_ctx->sd->version)) {
-        // Not actually masked, we're just highjacking the masked_latent variable since it will be used the same way
-        if (!sd_ctx->sd->use_tiny_autoencoder) {
-            if (sd_ctx->sd->is_using_edm_v_parameterization) {
-                // for CosXL edit
-                masked_latent = sd_ctx->sd->get_first_stage_encoding(work_ctx, init_moments);
-            } else {
-                masked_latent = sd_ctx->sd->get_first_stage_encoding_mode(work_ctx, init_moments);
-            }
-        } else {
-            masked_latent = init_latent;
-        }
     } else {
+        if (sd_version_is_edit(sd_ctx->sd->version)) {
+            // Not actually masked, we're just highjacking the masked_latent variable since it will be used the same way
+            if (!sd_ctx->sd->use_tiny_autoencoder) {
+                if (sd_ctx->sd->is_using_edm_v_parameterization) {
+                    // for CosXL edit
+                    concat_latent = sd_ctx->sd->get_first_stage_encoding(work_ctx, init_moments);
+                } else {
+                    concat_latent = sd_ctx->sd->get_first_stage_encoding_mode(work_ctx, init_moments);
+                }
+            } else {
+                concat_latent = init_latent;
+            }
+        }
         // LOG_WARN("Inpainting with a base model is not great");
-        masked_latent = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, width / 8, height / 8, 1, 1);
-        for (int ix = 0; ix < masked_latent->ne[0]; ix++) {
-            for (int iy = 0; iy < masked_latent->ne[1]; iy++) {
+        denoise_mask = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, width / 8, height / 8, 1, 1);
+        for (int ix = 0; ix < denoise_mask->ne[0]; ix++) {
+            for (int iy = 0; iy < denoise_mask->ne[1]; iy++) {
                 int mx  = ix * 8;
                 int my  = iy * 8;
                 float m = ggml_tensor_get_f32(mask_img, mx, my);
-                ggml_tensor_set_f32(masked_latent, m, ix, iy);
+                ggml_tensor_set_f32(denoise_mask, m, ix, iy);
             }
         }
     }
@@ -2137,7 +2137,8 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
                                                input_id_images_path_c_str,
                                                slg_params,
                                                apg_params,
-                                               masked_latent);
+                                               concat_latent,
+                                               denoise_mask);
 
     size_t t2 = ggml_time_ms();
 
