@@ -964,7 +964,7 @@ public:
                         SDCondition id_cond,
                         sd_slg_params_t slg_params = {NULL, 0, 0, 0, 0, false},
                         sd_apg_params_t apg_params = {1, 0, 0, 0},
-                        ggml_tensor* denoise_mask    = NULL) {
+                        ggml_tensor* denoise_mask  = NULL) {
         std::vector<int> skip_layers(slg_params.skip_layers, slg_params.skip_layers + slg_params.skip_layers_count);
 
         // TODO (Pix2Pix): separate image guidance params (right now it's reusing distilled guidance)
@@ -1187,13 +1187,17 @@ public:
                 for (int i = 0; i < ne_elements; i++) {
                     float delta;
                     if (has_img_guidance) {
-                        if (has_unconditioned) {
+                        if (cfg_scale == 1) {
+                            // Weird guidance (important: use img_cfg_scale instead of cfg_scale in the final formula)
+                            delta = img_cond_data[i] - negative_data[i];
+                        } else if (has_unconditioned) {
                             // 2-conditioning CFG (img_cfg_scale != cfg_scale != 1)
                             delta = positive_data[i] + (negative_data[i] * (1 - img_cfg_scale) + img_cond_data[i] * (img_cfg_scale - cfg_scale)) / (cfg_scale - 1);
                         } else {
                             // pure img CFG (img_cfg_scale == 1, cfg_scale !=1)
                             delta = positive_data[i] - img_cond_data[i];
                         }
+
                     } else {
                         // classic CFG (img_cfg_scale == cfg_scale != 1)
                         delta = positive_data[i] - negative_data[i];
@@ -1249,8 +1253,12 @@ public:
                         float scale = min_cfg + (cfg_scale - min_cfg) * (i3 * 1.0f / ne3);
                     } else {
                         float delta = deltas[i];
-
-                        latent_result = positive_data[i] + (cfg_scale - 1) * delta;
+                        if (cfg_scale != 1) {
+                            latent_result = positive_data[i] + (cfg_scale - 1) * delta;
+                        } else if (has_img_guidance) {
+                            // disables apg
+                            latent_result = positive_data[i] + (img_cfg_scale - 1) * delta;
+                        }
                     }
                 }
                 if (is_skiplayer_step && slg_params.scale != 0.0) {
