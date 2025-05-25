@@ -61,10 +61,10 @@ enum schedule_t {
 
 // same as enum ggml_type
 enum sd_type_t {
-    SD_TYPE_F32     = 0,
-    SD_TYPE_F16     = 1,
-    SD_TYPE_Q4_0    = 2,
-    SD_TYPE_Q4_1    = 3,
+    SD_TYPE_F32  = 0,
+    SD_TYPE_F16  = 1,
+    SD_TYPE_Q4_0 = 2,
+    SD_TYPE_Q4_1 = 3,
     // SD_TYPE_Q4_2 = 4, support has been removed
     // SD_TYPE_Q4_3 = 5, support has been removed
     SD_TYPE_Q5_0    = 6,
@@ -95,12 +95,12 @@ enum sd_type_t {
     // SD_TYPE_Q4_0_4_4 = 31, support has been removed from gguf files
     // SD_TYPE_Q4_0_4_8 = 32,
     // SD_TYPE_Q4_0_8_8 = 33,
-    SD_TYPE_TQ1_0   = 34,
-    SD_TYPE_TQ2_0   = 35,
+    SD_TYPE_TQ1_0 = 34,
+    SD_TYPE_TQ2_0 = 35,
     // SD_TYPE_IQ4_NL_4_4 = 36,
     // SD_TYPE_IQ4_NL_4_8 = 37,
     // SD_TYPE_IQ4_NL_8_8 = 38,
-    SD_TYPE_COUNT   = 39,
+    SD_TYPE_COUNT = 39,
 };
 
 SD_API const char* sd_type_name(enum sd_type_t type);
@@ -127,21 +127,6 @@ typedef struct {
     uint8_t* data;
 } sd_image_t;
 
-typedef struct {
-    float eta;
-    float momentum;
-    float norm_treshold;
-    float norm_treshold_smoothing;
-} sd_apg_params_t;
-
-typedef struct {
-    int* skip_layers;
-    size_t skip_layers_count;
-    float scale;
-    float skip_layer_start;
-    float skip_layer_end;
-    bool slg_uncond;
-} sd_slg_params_t;
 
 typedef void (*sd_log_cb_t)(enum sd_log_level_t level, const char* text, void* data);
 typedef void (*sd_progress_cb_t)(int step, int steps, float time, void* data);
@@ -157,6 +142,31 @@ SD_API int32_t get_num_physical_cores();
 SD_API const char* sd_get_system_info();
 
 typedef struct sd_ctx_t sd_ctx_t;
+
+typedef struct {
+    float eta;
+    float momentum;
+    float norm_treshold;
+    float norm_treshold_smoothing;
+} sd_apg_params_t;
+
+typedef struct sd_slg_params_t {
+    int* layers;
+    size_t layer_count;
+    float layer_start;
+    float layer_end;
+    float scale;
+    bool slg_uncond;
+} sd_slg_params_t;
+
+typedef struct sd_guidance_params_t {
+    float txt_cfg;
+    float img_cfg;
+    float min_cfg;
+    float distilled_guidance;
+    sd_slg_params_t slg;
+    sd_apg_params_t apg;
+} sd_guidance_params_t;
 
 SD_API sd_ctx_t* new_sd_ctx(const char* model_path,
                             const char* clip_l_path,
@@ -188,8 +198,7 @@ SD_API sd_image_t* txt2img(sd_ctx_t* sd_ctx,
                            const char* prompt,
                            const char* negative_prompt,
                            int clip_skip,
-                           float cfg_scale,
-                           float guidance,
+                           sd_guidance_params_t guidance,
                            float eta,
                            int width,
                            int height,
@@ -201,9 +210,7 @@ SD_API sd_image_t* txt2img(sd_ctx_t* sd_ctx,
                            float control_strength,
                            float style_strength,
                            bool normalize_input,
-                           const char* input_id_images_path,
-                           sd_slg_params_t slg_params,
-                           sd_apg_params_t apg_params);
+                           const char* input_id_images_path);
 
 SD_API sd_image_t* img2img(sd_ctx_t* sd_ctx,
                            sd_image_t init_image,
@@ -211,8 +218,7 @@ SD_API sd_image_t* img2img(sd_ctx_t* sd_ctx,
                            const char* prompt,
                            const char* negative_prompt,
                            int clip_skip,
-                           float cfg_scale,
-                           float guidance,
+                           sd_guidance_params_t guidance,
                            float eta,
                            int width,
                            int height,
@@ -225,9 +231,7 @@ SD_API sd_image_t* img2img(sd_ctx_t* sd_ctx,
                            float control_strength,
                            float style_strength,
                            bool normalize_input,
-                           const char* input_id_images_path,
-                           sd_slg_params_t slg_params,
-                           sd_apg_params_t apg_params);
+                           const char* input_id_images_path);
 
 SD_API sd_image_t* img2vid(sd_ctx_t* sd_ctx,
                            sd_image_t init_image,
@@ -237,8 +241,7 @@ SD_API sd_image_t* img2vid(sd_ctx_t* sd_ctx,
                            int motion_bucket_id,
                            int fps,
                            float augmentation_level,
-                           float min_cfg,
-                           float cfg_scale,
+                           sd_guidance_params_t guidance,
                            enum sample_method_t sample_method,
                            int sample_steps,
                            float strength,

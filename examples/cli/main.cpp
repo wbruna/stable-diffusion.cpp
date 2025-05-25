@@ -99,15 +99,16 @@ struct SDParams {
 
     std::string prompt;
     std::string negative_prompt;
-    float min_cfg     = 1.0f;
-    float cfg_scale   = 7.0f;
-    float guidance    = 3.5f;
-    float eta         = 0.f;
-    float style_ratio = 20.f;
-    int clip_skip     = -1;  // <= 0 represents unspecified
-    int width         = 512;
-    int height        = 512;
-    int batch_count   = 1;
+    float min_cfg       = 1.0f;
+    float cfg_scale     = 7.0f;
+    float img_cfg_scale = INFINITY;
+    float guidance      = 3.5f;
+    float eta           = 0.f;
+    float style_ratio   = 20.f;
+    int clip_skip       = -1;  // <= 0 represents unspecified
+    int width           = 512;
+    int height          = 512;
+    int batch_count     = 1;
 
     int video_frames         = 6;
     int motion_bucket_id     = 127;
@@ -187,6 +188,7 @@ void print_params(SDParams params) {
     printf("    negative_prompt:   %s\n", params.negative_prompt.c_str());
     printf("    min_cfg:           %.2f\n", params.min_cfg);
     printf("    cfg_scale:         %.2f\n", params.cfg_scale);
+    printf("    img_cfg_scale:     %.2f\n", params.img_cfg_scale);
     printf("    slg_scale:         %.2f\n", params.slg_scale);
     printf("    guidance:          %.2f\n", params.guidance);
     printf("    eta:               %.2f\n", params.eta);
@@ -241,7 +243,8 @@ void print_usage(int argc, const char* argv[]) {
     printf("  -p, --prompt [PROMPT]              the prompt to render\n");
     printf("  -n, --negative-prompt PROMPT       the negative prompt (default: \"\")\n");
     printf("  --cfg-scale SCALE                  unconditional guidance scale: (default: 7.0)\n");
-    printf("  --guidance SCALE                   guidance scale for img2img (default: 3.5)\n");
+    printf("  --img_cfg-scale SCALE              image guidance scale for inpaint or instruct-pix2pix models: (default: same as --cfg-scale)\n");
+    printf("  --guidance SCALE                   distilled guidance scale for models with guidance input (default: 3.5)\n");
     printf("  --apg-eta VALUE                    parallel projected guidance scale for APG (default: 1.0, recommended: between 0 and 1)\n");
     printf("  --apg-momentum VALUE               CFG update direction momentum for APG (default: 0, recommended: around -0.5)\n");
     printf("  --apg-nt, --apg-rescale VALUE      CFG update direction norm threshold for APG (default: 0 = disabled, recommended: 4-15)\n");
@@ -456,6 +459,12 @@ void parse_args(int argc, const char** argv, SDParams& params) {
                 break;
             }
             params.cfg_scale = std::stof(argv[i]);
+        } else if (arg == "--img-cfg-scale") {
+            if (++i >= argc) {
+                invalid_arg = true;
+                break;
+            }
+            params.img_cfg_scale = std::stof(argv[i]);
         } else if (arg == "--guidance") {
             if (++i >= argc) {
                 invalid_arg = true;
@@ -820,6 +829,10 @@ void parse_args(int argc, const char** argv, SDParams& params) {
             params.output_path = "output.gguf";
         }
     }
+
+    if (!isfinite(params.img_cfg_scale)) {
+        params.img_cfg_scale = params.cfg_scale;
+    }
 }
 
 static std::string sd_basename(const std::string& path) {
@@ -933,6 +946,24 @@ int main(int argc, const char* argv[]) {
 
     parse_args(argc, argv, params);
     preview_path = params.preview_path.c_str();
+
+    sd_guidance_params_t guidance_params = {params.cfg_scale,
+                                            params.img_cfg_scale,
+                                            params.min_cfg,
+                                            params.guidance,
+                                            {
+                                                params.skip_layers.data(),
+                                                params.skip_layers.size(),
+                                                params.skip_layer_start,
+                                                params.skip_layer_end,
+                                                params.slg_scale,
+                                            },
+                                            {
+                                                params.apg_eta,
+                                                params.apg_momentum,
+                                                params.apg_norm_threshold,
+                                                params.apg_norm_smoothing
+                                            }};
 
     sd_set_log_callback(sd_log_cb, (void*)&params);
     sd_set_preview_callback((sd_preview_cb_t)step_callback, params.preview_method, params.preview_interval);
@@ -1105,8 +1136,7 @@ int main(int argc, const char* argv[]) {
                           params.prompt.c_str(),
                           params.negative_prompt.c_str(),
                           params.clip_skip,
-                          params.cfg_scale,
-                          params.guidance,
+                          guidance_params,
                           params.eta,
                           params.width,
                           params.height,
@@ -1118,17 +1148,7 @@ int main(int argc, const char* argv[]) {
                           params.control_strength,
                           params.style_ratio,
                           params.normalize_input,
-                          params.input_id_images_path.c_str(),
-                          sd_slg_params_t{params.skip_layers.data(),
-                                          params.skip_layers.size(),
-                                          params.slg_scale,
-                                          params.skip_layer_start,
-                                          params.skip_layer_end,
-                                          params.slg_uncond},
-                          sd_apg_params_t{params.apg_eta,
-                                          params.apg_momentum,
-                                          params.apg_norm_threshold,
-                                          params.apg_norm_smoothing});
+                          params.input_id_images_path.c_str());
     } else {
         sd_image_t input_image = {(uint32_t)params.width,
                                   (uint32_t)params.height,
@@ -1144,8 +1164,7 @@ int main(int argc, const char* argv[]) {
                               params.motion_bucket_id,
                               params.fps,
                               params.augmentation_level,
-                              params.min_cfg,
-                              params.cfg_scale,
+                              guidance_params,
                               params.sample_method,
                               params.sample_steps,
                               params.strength,
@@ -1178,8 +1197,7 @@ int main(int argc, const char* argv[]) {
                               params.prompt.c_str(),
                               params.negative_prompt.c_str(),
                               params.clip_skip,
-                              params.cfg_scale,
-                              params.guidance,
+                              guidance_params,
                               params.eta,
                               params.width,
                               params.height,
@@ -1192,17 +1210,7 @@ int main(int argc, const char* argv[]) {
                               params.control_strength,
                               params.style_ratio,
                               params.normalize_input,
-                              params.input_id_images_path.c_str(),
-                              sd_slg_params_t{params.skip_layers.data(),
-                                              params.skip_layers.size(),
-                                              params.slg_scale,
-                                              params.skip_layer_start,
-                                              params.skip_layer_end,
-                                              params.slg_uncond},
-                              sd_apg_params_t{params.apg_eta,
-                                              params.apg_momentum,
-                                              params.apg_norm_threshold,
-                                              params.apg_norm_smoothing});
+                              params.input_id_images_path.c_str());
         }
     }
 

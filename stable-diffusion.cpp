@@ -954,24 +954,25 @@ public:
                         SDCondition uncond,
                         ggml_tensor* control_hint,
                         float control_strength,
-                        float min_cfg,
-                        float cfg_scale,
-                        float guidance,
+                        sd_guidance_params_t guidance,
                         float eta,
                         sample_method_t method,
                         const std::vector<float>& sigmas,
                         int start_merge_step,
                         SDCondition id_cond,
-                        sd_slg_params_t slg_params = {NULL, 0, 0, 0, 0, false},
-                        sd_apg_params_t apg_params = {1, 0, 0, 0},
-                        ggml_tensor* denoise_mask  = NULL) {
-        std::vector<int> skip_layers(slg_params.skip_layers, slg_params.skip_layers + slg_params.skip_layers_count);
+                        ggml_tensor* denoise_mask = NULL) {
+        std::vector<int> skip_layers(guidance.slg.layers, guidance.slg.layers + guidance.slg.layer_count);
 
         // TODO (Pix2Pix): separate image guidance params (right now it's reusing distilled guidance)
 
-        float img_cfg_scale = guidance;
+        float cfg_scale     = guidance.txt_cfg;
+        float img_cfg_scale = guidance.img_cfg;
+        float slg_scale     = guidance.slg.scale;
+
+        float min_cfg = guidance.min_cfg;
+
         if (img_cfg_scale != cfg_scale && !sd_version_use_concat(version)) {
-            LOG_WARN("2-conditioning CFG is not supported with this model, disabling it...");
+            LOG_WARN("2-conditioning CFG is not supported with this model, disabling it for better performance...");
             img_cfg_scale = cfg_scale;
         }
 
@@ -998,7 +999,7 @@ public:
 
         bool has_unconditioned = img_cfg_scale != 1.0 && uncond.c_crossattn != NULL;
         bool has_img_guidance  = cfg_scale != img_cfg_scale && uncond.c_crossattn != NULL;
-        bool has_skiplayer     = (slg_params.scale != 0.0 || slg_params.slg_uncond) && skip_layers.size() > 0;
+        bool has_skiplayer     = (guidance.slg.scale != 0.0 || guidance.slg.slg_uncond) && skip_layers.size() > 0;
 
         // denoise wrapper
         struct ggml_tensor* out_cond     = ggml_dup_tensor(work_ctx, x);
@@ -1011,7 +1012,7 @@ public:
         }
         if (has_skiplayer) {
             if (sd_version_is_dit(version)) {
-                if (slg_params.scale != 0.0) {
+                if (guidance.slg.scale != 0.0) {
                     out_skip = ggml_dup_tensor(work_ctx, x);
                 }
             } else {
@@ -1035,7 +1036,7 @@ public:
         }
 
         std::vector<float> apg_momentum_buffer;
-        if (apg_params.momentum != 0)
+        if (guidance.apg.momentum != 0)
             apg_momentum_buffer.resize((size_t)ggml_nelements(denoised));
 
         auto denoise = [&](ggml_tensor* input, float sigma, int step) -> ggml_tensor* {
@@ -1053,7 +1054,7 @@ public:
             float t = denoiser->sigma_to_t(sigma);
             std::vector<float> timesteps_vec(x->ne[3], t);  // [N, ]
             auto timesteps = vector_to_ggml_tensor(work_ctx, timesteps_vec);
-            std::vector<float> guidance_vec(x->ne[3], guidance);
+            std::vector<float> guidance_vec(x->ne[3], guidance.distilled_guidance);
             auto guidance_tensor = vector_to_ggml_tensor(work_ctx, guidance_vec);
 
             copy_ggml_tensor(noised_input, input);
@@ -1096,7 +1097,7 @@ public:
                                          &out_cond);
             }
             int step_count         = sigmas.size();
-            bool is_skiplayer_step = has_skiplayer && step > (int)(slg_params.skip_layer_start * step_count) && step < (int)(slg_params.skip_layer_end * step_count);
+            bool is_skiplayer_step = has_skiplayer && step > (int)(guidance.slg.layer_start * step_count) && step < (int)(guidance.slg.layer_end * step_count);
 
             float* negative_data = NULL;
             if (has_unconditioned) {
@@ -1105,7 +1106,7 @@ public:
                     control_net->compute(n_threads, noised_input, control_hint, timesteps, uncond.c_crossattn, uncond.c_vector);
                     controls = control_net->controls;
                 }
-                if (is_skiplayer_step && slg_params.slg_uncond) {
+                if (is_skiplayer_step && guidance.slg.slg_uncond) {
                     LOG_DEBUG("Skipping layers at uncond step %d\n", step);
                     diffusion_model->compute(n_threads,
                                              noised_input,
@@ -1153,7 +1154,7 @@ public:
             }
 
             float* skip_layer_data = NULL;
-            if (is_skiplayer_step && slg_params.scale != 0.0) {
+            if (is_skiplayer_step && guidance.slg.scale != 0.0) {
                 LOG_DEBUG("Skipping layers at step %d\n", step);
                 // skip layer (same as conditionned)
                 diffusion_model->compute(n_threads,
@@ -1202,30 +1203,30 @@ public:
                         // classic CFG (img_cfg_scale == cfg_scale != 1)
                         delta = positive_data[i] - negative_data[i];
                     }
-                    if (apg_params.momentum != 0) {
-                        delta += apg_params.momentum * apg_momentum_buffer[i];
+                    if (guidance.apg.momentum != 0) {
+                        delta += guidance.apg.momentum * apg_momentum_buffer[i];
                         apg_momentum_buffer[i] = delta;
                     }
-                    if (apg_params.norm_treshold > 0) {
+                    if (guidance.apg.norm_treshold > 0) {
                         diff_norm += delta * delta;
                     }
-                    if (apg_params.eta != 1.0f) {
+                    if (guidance.apg.eta != 1.0f) {
                         cond_norm_sq += positive_data[i] * positive_data[i];
                         dot += positive_data[i] * delta;
                     }
                     deltas[i] = delta;
                 }
-                if (apg_params.norm_treshold > 0) {
+                if (guidance.apg.norm_treshold > 0) {
                     diff_norm = sqrtf(diff_norm);
-                    if (apg_params.norm_treshold_smoothing <= 0) {
-                        apg_scale_factor = std::min(1.0f, apg_params.norm_treshold / diff_norm);
+                    if (guidance.apg.norm_treshold_smoothing <= 0) {
+                        apg_scale_factor = std::min(1.0f, guidance.apg.norm_treshold / diff_norm);
                     } else {
                         // Experimental: smooth saturate
-                        float x          = apg_params.norm_treshold / diff_norm;
-                        apg_scale_factor = x / std::pow(1 + std::pow(x, 1.0 / apg_params.norm_treshold_smoothing), apg_params.norm_treshold_smoothing);
+                        float x          = guidance.apg.norm_treshold / diff_norm;
+                        apg_scale_factor = x / std::pow(1 + std::pow(x, 1.0 / guidance.apg.norm_treshold_smoothing), guidance.apg.norm_treshold_smoothing);
                     }
                 }
-                if (apg_params.eta != 1.0f) {
+                if (guidance.apg.eta != 1.0f) {
                     dot *= apg_scale_factor;
                     // pre-normalize (avoids one square root and ne_elements extra divs)
                     dot /= cond_norm_sq;
@@ -1233,12 +1234,12 @@ public:
 
                 for (int i = 0; i < ne_elements; i++) {
                     deltas[i] *= apg_scale_factor;
-                    if (apg_params.eta != 1.0f) {
+                    if (guidance.apg.eta != 1.0f) {
                         float apg_parallel   = dot * positive_data[i];
                         float apg_orthogonal = deltas[i] - apg_parallel;
 
                         // tweak deltas
-                        deltas[i] = apg_orthogonal + apg_params.eta * apg_parallel;
+                        deltas[i] = apg_orthogonal + guidance.apg.eta * apg_parallel;
                     }
                 }
             }
@@ -1260,9 +1261,12 @@ public:
                             latent_result = positive_data[i] + (img_cfg_scale - 1) * delta;
                         }
                     }
+                } else if (has_img_guidance) {
+                    // img_cfg_scale == 1
+                    latent_result = img_cond_data[i] + cfg_scale * (positive_data[i] - img_cond_data[i]);
                 }
-                if (is_skiplayer_step && slg_params.scale != 0.0) {
-                    latent_result = latent_result + (positive_data[i] - skip_layer_data[i]) * slg_params.scale;
+                if (is_skiplayer_step && guidance.slg.scale != 0.0) {
+                    latent_result = latent_result + (positive_data[i] - skip_layer_data[i]) * guidance.slg.scale;
                 }
                 // v = latent_result, eps = latent_result
                 // denoised = (v * c_out + input * c_skip) or (input + eps * c_out)
@@ -1526,8 +1530,7 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
                            std::string prompt,
                            std::string negative_prompt,
                            int clip_skip,
-                           float cfg_scale,
-                           float guidance,
+                           sd_guidance_params_t guidance,
                            float eta,
                            int width,
                            int height,
@@ -1540,8 +1543,6 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
                            float style_ratio,
                            bool normalize_input,
                            std::string input_id_images_path,
-                           sd_slg_params_t slg_params,
-                           sd_apg_params_t apg_params,
                            ggml_tensor* concat_latent = NULL,
                            ggml_tensor* denoise_mask  = NULL) {
     if (seed < 0) {
@@ -1691,7 +1692,7 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
                                                                            sd_ctx->sd->diffusion_model->get_adm_in_channels());
 
     SDCondition uncond;
-    if (cfg_scale != 1.0 || sd_version_use_concat(sd_ctx->sd->version) && cfg_scale != guidance) {
+    if (guidance.txt_cfg != 1.0 || sd_version_use_concat(sd_ctx->sd->version) && guidance.txt_cfg != guidance.img_cfg) {
         bool force_zero_embeddings = false;
         if (sd_version_is_sdxl(sd_ctx->sd->version) && negative_prompt.size() == 0 && !sd_ctx->sd->is_using_edm_v_parameterization) {
             force_zero_embeddings = true;
@@ -1786,6 +1787,9 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
             LOG_INFO("PHOTOMAKER: start_merge_step: %d", start_merge_step);
         }
 
+        // Disable min_cfg
+        guidance.min_cfg = guidance.txt_cfg;
+
         struct ggml_tensor* x_0 = sd_ctx->sd->sample(work_ctx,
                                                      x_t,
                                                      noise,
@@ -1793,16 +1797,12 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
                                                      uncond,
                                                      image_hint,
                                                      control_strength,
-                                                     cfg_scale,
-                                                     cfg_scale,
                                                      guidance,
                                                      eta,
                                                      sample_method,
                                                      sigmas,
                                                      start_merge_step,
                                                      id_cond,
-                                                     slg_params,
-                                                     apg_params,
                                                      denoise_mask);
 
         // struct ggml_tensor* x_0 = load_tensor_from_file(ctx, "samples_ddim.bin");
@@ -1858,8 +1858,7 @@ sd_image_t* txt2img(sd_ctx_t* sd_ctx,
                     const char* prompt_c_str,
                     const char* negative_prompt_c_str,
                     int clip_skip,
-                    float cfg_scale,
-                    float guidance,
+                    sd_guidance_params_t guidance,
                     float eta,
                     int width,
                     int height,
@@ -1871,9 +1870,7 @@ sd_image_t* txt2img(sd_ctx_t* sd_ctx,
                     float control_strength,
                     float style_ratio,
                     bool normalize_input,
-                    const char* input_id_images_path_c_str,
-                    sd_slg_params_t slg_params,
-                    sd_apg_params_t apg_params) {
+                    const char* input_id_images_path_c_str) {
     LOG_DEBUG("txt2img %dx%d", width, height);
     if (sd_ctx == NULL) {
         return NULL;
@@ -1937,7 +1934,6 @@ sd_image_t* txt2img(sd_ctx_t* sd_ctx,
                                                prompt_c_str,
                                                negative_prompt_c_str,
                                                clip_skip,
-                                               cfg_scale,
                                                guidance,
                                                eta,
                                                width,
@@ -1950,10 +1946,7 @@ sd_image_t* txt2img(sd_ctx_t* sd_ctx,
                                                control_strength,
                                                style_ratio,
                                                normalize_input,
-                                               input_id_images_path_c_str,
-                                               slg_params,
-                                               apg_params,
-                                               NULL, NULL);
+                                               input_id_images_path_c_str, NULL, NULL);
 
     size_t t1 = ggml_time_ms();
 
@@ -1968,8 +1961,7 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
                     const char* prompt_c_str,
                     const char* negative_prompt_c_str,
                     int clip_skip,
-                    float cfg_scale,
-                    float guidance,
+                    sd_guidance_params_t guidance,
                     float eta,
                     int width,
                     int height,
@@ -1982,9 +1974,7 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
                     float control_strength,
                     float style_ratio,
                     bool normalize_input,
-                    const char* input_id_images_path_c_str,
-                    sd_slg_params_t slg_params,
-                    sd_apg_params_t apg_params) {
+                    const char* input_id_images_path_c_str) {
     LOG_DEBUG("img2img %dx%d", width, height);
     if (sd_ctx == NULL) {
         return NULL;
@@ -2129,7 +2119,6 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
                                                prompt_c_str,
                                                negative_prompt_c_str,
                                                clip_skip,
-                                               cfg_scale,
                                                guidance,
                                                eta,
                                                width,
@@ -2143,8 +2132,6 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
                                                style_ratio,
                                                normalize_input,
                                                input_id_images_path_c_str,
-                                               slg_params,
-                                               apg_params,
                                                concat_latent,
                                                denoise_mask);
 
@@ -2163,8 +2150,7 @@ SD_API sd_image_t* img2vid(sd_ctx_t* sd_ctx,
                            int motion_bucket_id,
                            int fps,
                            float augmentation_level,
-                           float min_cfg,
-                           float cfg_scale,
+                           sd_guidance_params_t guidance,
                            enum sample_method_t sample_method,
                            int sample_steps,
                            float strength,
@@ -2241,16 +2227,13 @@ SD_API sd_image_t* img2vid(sd_ctx_t* sd_ctx,
                                                  uncond,
                                                  {},
                                                  0.f,
-                                                 min_cfg,
-                                                 cfg_scale,
-                                                 0.f,
+                                                 guidance,
                                                  0.f,
                                                  sample_method,
                                                  sigmas,
                                                  -1,
                                                  SDCondition(NULL, NULL, NULL),
-                                                 {},
-                                                 {}, NULL);
+                                                 NULL);
 
     int64_t t2 = ggml_time_ms();
     LOG_INFO("sampling completed, taking %.2fs", (t2 - t1) * 1.0f / 1000);
