@@ -1738,10 +1738,10 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
     LOG_INFO("sampling using %s method", sampling_methods_str[sample_method]);
 
     struct ggml_tensor* control_latent = NULL;
-    if(sd_version_is_control(sd_ctx->sd->version) && image_hint != NULL){
+    if (sd_version_is_control(sd_ctx->sd->version) && image_hint != NULL) {
         if (!sd_ctx->sd->use_tiny_autoencoder) {
             struct ggml_tensor* control_moments = sd_ctx->sd->encode_first_stage(work_ctx, image_hint);
-            control_latent                     = sd_ctx->sd->get_first_stage_encoding(work_ctx, control_moments);
+            control_latent                      = sd_ctx->sd->get_first_stage_encoding(work_ctx, control_moments);
         } else {
             control_latent = sd_ctx->sd->encode_first_stage(work_ctx, image_hint);
         }
@@ -1820,7 +1820,7 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx,
         }
         LOG_INFO("HERE");
 
-        cond.c_concat     = concat_latent;
+        cond.c_concat = concat_latent;
     }
 
     for (int b = 0; b < batch_count; b++) {
@@ -2091,16 +2091,23 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
         } else if (sd_ctx->sd->version == VERSION_FLEX_2) {
             mask_channels = 1 + init_latent->ne[2];
         }
-        ggml_tensor* masked_img = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, width, height, 3, 1);
-        // Restore init_img (encode_first_stage has side effects) TODO: remove the side effects?
-        sd_image_to_tensor(init_image.data, init_img);
-        sd_apply_mask(init_img, mask_img, masked_img);
         ggml_tensor* masked_latent_0 = NULL;
-        if (!sd_ctx->sd->use_tiny_autoencoder) {
-            ggml_tensor* moments = sd_ctx->sd->encode_first_stage(work_ctx, masked_img);
-            masked_latent_0      = sd_ctx->sd->get_first_stage_encoding(work_ctx, moments);
+        if (sd_ctx->sd->version != VERSION_FLEX_2) {
+            // most inpaint models mask before vae
+            ggml_tensor* masked_img = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, width, height, 3, 1);
+            // Restore init_img (encode_first_stage has side effects) TODO: remove the side effects?
+            sd_image_to_tensor(init_image.data, init_img);
+            sd_apply_mask(init_img, mask_img, masked_img);
+            if (!sd_ctx->sd->use_tiny_autoencoder) {
+                ggml_tensor* moments = sd_ctx->sd->encode_first_stage(work_ctx, masked_img);
+                masked_latent_0      = sd_ctx->sd->get_first_stage_encoding(work_ctx, moments);
+            } else {
+                masked_latent_0 = sd_ctx->sd->encode_first_stage(work_ctx, masked_img);
+            }
         } else {
-            masked_latent_0 = sd_ctx->sd->encode_first_stage(work_ctx, masked_img);
+            // mask after vae
+            masked_latent_0 = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, init_latent->ne[0], init_latent->ne[1], init_latent->ne[2], 1);
+            sd_apply_mask(init_latent, mask_img, masked_latent_0, 0.);
         }
         concat_latent = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, masked_latent_0->ne[0], masked_latent_0->ne[1], mask_channels + masked_latent_0->ne[2], 1);
         for (int ix = 0; ix < masked_latent_0->ne[0]; ix++) {
