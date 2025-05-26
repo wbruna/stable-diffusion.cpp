@@ -32,12 +32,13 @@ enum SDVersion {
     VERSION_SD3_PIX2PIX,
     VERSION_FLUX,
     VERSION_FLUX_FILL,
+    VERSION_FLUX_CONTROLS,
     VERSION_FLEX_2,
     VERSION_COUNT,
 };
 
 static inline bool sd_version_is_flux(SDVersion version) {
-    if (version == VERSION_FLUX || version == VERSION_FLUX_FILL || version == VERSION_FLEX_2 ) {
+    if (version == VERSION_FLUX || version == VERSION_FLUX_FILL || version == VERSION_FLUX_CONTROLS || version == VERSION_FLEX_2 ) {
         return true;
     }
     return false;
@@ -71,15 +72,16 @@ static inline bool sd_version_is_sdxl(SDVersion version) {
     return false;
 }
 
-static inline bool sd_version_is_inpaint(SDVersion version) {
-    if (version == VERSION_SD1_INPAINT || version == VERSION_SD2_INPAINT || version == VERSION_SDXL_INPAINT || version == VERSION_FLUX_FILL || version == VERSION_FLEX_2) {
+
+static inline bool sd_version_is_dit(SDVersion version) {
+    if (sd_version_is_flux(version) || sd_version_is_sd3(version)) {
         return true;
     }
     return false;
 }
 
-static inline bool sd_version_is_dit(SDVersion version) {
-    if (sd_version_is_flux(version) || sd_version_is_sd3(version)) {
+static inline bool sd_version_is_inpaint(SDVersion version) {
+    if (version == VERSION_SD1_INPAINT || version == VERSION_SD2_INPAINT || version == VERSION_SDXL_INPAINT || version == VERSION_FLUX_FILL || version == VERSION_FLEX_2) {
         return true;
     }
     return false;
@@ -89,8 +91,12 @@ static inline bool sd_version_is_edit(SDVersion version) {
     return version == VERSION_SD1_PIX2PIX || version == VERSION_SDXL_PIX2PIX  || version == VERSION_SD3_PIX2PIX;
 }
 
+static inline bool sd_version_is_control(SDVersion version) {
+    return version == VERSION_FLUX_CONTROLS || version == VERSION_FLEX_2;
+}
+
 static bool sd_version_use_concat(SDVersion version) {
-    return sd_version_is_edit(version) || sd_version_is_inpaint(version);
+    return sd_version_is_edit(version) || sd_version_is_inpaint(version)|| sd_version_is_control(version);
 }
 
 enum PMVersion {
