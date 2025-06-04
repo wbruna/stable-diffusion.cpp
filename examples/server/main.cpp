@@ -1484,14 +1484,26 @@ void start_server(SDParams params) {
             }
 
             {
+                sd_guidance_params_t guidance_params = {params.lastRequest.cfg_scale,
+                                                        params.lastRequest.cfg_scale,
+                                                        params.lastRequest.min_cfg,
+                                                        params.lastRequest.guidance,
+                                                        {params.lastRequest.skip_layers.data(),
+                                                         params.lastRequest.skip_layers.size(),
+                                                         params.lastRequest.slg_scale,
+                                                         params.lastRequest.skip_layer_start,
+                                                         params.lastRequest.skip_layer_end},
+                                                        {params.lastRequest.apg_eta,
+                                                         params.lastRequest.apg_momentum,
+                                                         params.lastRequest.apg_norm_threshold,
+                                                         params.lastRequest.apg_norm_smoothing}};
                 sd_set_preview_callback((sd_preview_cb_t)step_callback, params.lastRequest.preview_method, params.lastRequest.preview_interval);
                 sd_image_t* results;
                 results = txt2img(sd_ctx,
                                   params.lastRequest.prompt.c_str(),
                                   params.lastRequest.negative_prompt.c_str(),
                                   params.lastRequest.clip_skip,
-                                  params.lastRequest.cfg_scale,
-                                  params.lastRequest.guidance,
+                                  guidance_params,
                                   0.,
                                   params.lastRequest.width,
                                   params.lastRequest.height,
@@ -1503,16 +1515,7 @@ void start_server(SDParams params) {
                                   1,
                                   params.lastRequest.style_ratio,
                                   params.lastRequest.normalize_input,
-                                  params.input_id_images_path.c_str(),
-                                  sd_slg_params_t{params.lastRequest.skip_layers.data(),
-                                                  params.lastRequest.skip_layers.size(),
-                                                  params.lastRequest.slg_scale,
-                                                  params.lastRequest.skip_layer_start,
-                                                  params.lastRequest.skip_layer_end},
-                                  sd_apg_params_t{params.lastRequest.apg_eta,
-                                                  params.lastRequest.apg_momentum,
-                                                  params.lastRequest.apg_norm_threshold,
-                                                  params.lastRequest.apg_norm_smoothing});
+                                  params.input_id_images_path.c_str());
 
                 if (results == NULL) {
                     printf("generate failed\n");
