@@ -554,7 +554,7 @@ struct AutoEncoderKL : public GGMLRunner {
         return gf;
     }
 
-    void compute(const int n_threads,
+    bool compute(const int n_threads,
                  struct ggml_tensor* z,
                  bool decode_graph,
                  struct ggml_tensor** output,
@@ -565,7 +565,7 @@ struct AutoEncoderKL : public GGMLRunner {
         };
         // ggml_set_f32(z, 0.5f);
         // print_ggml_tensor(z);
-        GGMLRunner::compute(get_graph, n_threads, true, output, output_ctx);
+        return GGMLRunner::compute(get_graph, n_threads, true, output, output_ctx);
     }
 
     void test() {

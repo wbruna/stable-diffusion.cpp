@@ -835,7 +835,7 @@ struct T5Runner : public GGMLRunner {
         return gf;
     }
 
-    void compute(const int n_threads,
+    bool compute(const int n_threads,
                  struct ggml_tensor* input_ids,
                  ggml_tensor** output,
                  ggml_context* output_ctx           = NULL,
@@ -843,7 +843,7 @@ struct T5Runner : public GGMLRunner {
         auto get_graph = [&]() -> struct ggml_cgraph* {
             return build_graph(input_ids, attention_mask);
         };
-        GGMLRunner::compute(get_graph, n_threads, true, output, output_ctx);
+        return GGMLRunner::compute(get_graph, n_threads, true, output, output_ctx);
     }
 
     static std::vector<int> _relative_position_bucket(const std::vector<int>& relative_position,

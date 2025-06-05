@@ -6,7 +6,7 @@
 #include "unet.hpp"
 
 struct DiffusionModel {
-    virtual void compute(int n_threads,
+    virtual bool compute(int n_threads,
                          struct ggml_tensor* x,
                          struct ggml_tensor* timesteps,
                          struct ggml_tensor* context,
@@ -61,7 +61,7 @@ struct UNetModel : public DiffusionModel {
         return unet.unet.adm_in_channels;
     }
 
-    void compute(int n_threads,
+    bool compute(int n_threads,
                  struct ggml_tensor* x,
                  struct ggml_tensor* timesteps,
                  struct ggml_tensor* context,
@@ -111,7 +111,7 @@ struct MMDiTModel : public DiffusionModel {
         return 768 + 1280;
     }
 
-    void compute(int n_threads,
+    bool compute(int n_threads,
                  struct ggml_tensor* x,
                  struct ggml_tensor* timesteps,
                  struct ggml_tensor* context,
@@ -162,7 +162,7 @@ struct FluxModel : public DiffusionModel {
         return 768;
     }
 
-    void compute(int n_threads,
+    bool compute(int n_threads,
                  struct ggml_tensor* x,
                  struct ggml_tensor* timesteps,
                  struct ggml_tensor* context,

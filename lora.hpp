@@ -835,11 +835,11 @@ struct LoraModel : public GGMLRunner {
         return gf;
     }
 
-    void apply(std::map<std::string, struct ggml_tensor*> model_tensors, SDVersion version, int n_threads) {
+    bool apply(std::map<std::string, struct ggml_tensor*> model_tensors, SDVersion version, int n_threads) {
         auto get_graph = [&]() -> struct ggml_cgraph* {
             return build_lora_graph(model_tensors, version);
         };
-        GGMLRunner::compute(get_graph, n_threads, true);
+        return GGMLRunner::compute(get_graph, n_threads, true);
     }
 };
 

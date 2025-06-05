@@ -755,7 +755,7 @@ public:
         return gf;
     }
 
-    void compute(const int n_threads,
+    bool compute(const int n_threads,
                  struct ggml_tensor* id_pixel_values,
                  struct ggml_tensor* prompt_embeds,
                  struct ggml_tensor* id_embeds,
@@ -767,8 +767,8 @@ public:
             return build_graph(id_pixel_values, prompt_embeds, class_tokens_mask, id_embeds);
         };
 
-        // GGMLRunner::compute(get_graph, n_threads, updated_prompt_embeds);
-        GGMLRunner::compute(get_graph, n_threads, true, updated_prompt_embeds, output_ctx);
+        // return GGMLRunner::compute(get_graph, n_threads, updated_prompt_embeds);
+        return GGMLRunner::compute(get_graph, n_threads, true, updated_prompt_embeds, output_ctx);
     }
 };
 

@@ -352,7 +352,7 @@ struct EDMVDenoiser : public CompVisVDenoiser {
     }
 
     float t_to_sigma(float t) {
-        return std::exp(t * 4/(float)TIMESTEPS);
+        return std::exp(t * 4 / (float)TIMESTEPS);
     }
 
     float sigma_to_t(float s) {
@@ -491,7 +491,7 @@ struct FluxFlowDenoiser : public Denoiser {
 typedef std::function<ggml_tensor*(ggml_tensor*, float, int)> denoise_cb_t;
 
 // k diffusion reverse ODE: dx = (x - D(x;\sigma)) / \sigma dt; \sigma(t) = t
-static void sample_k_diffusion(sample_method_t method,
+static bool sample_k_diffusion(sample_method_t method,
                                denoise_cb_t model,
                                ggml_context* work_ctx,
                                ggml_tensor* x,
@@ -510,6 +510,9 @@ static void sample_k_diffusion(sample_method_t method,
 
                 // denoise
                 ggml_tensor* denoised = model(x, sigma, i + 1);
+                if (denoised == NULL) {
+                    return false;
+                }
 
                 // d = (x - denoised) / sigma
                 {
@@ -563,6 +566,9 @@ static void sample_k_diffusion(sample_method_t method,
 
                 // denoise
                 ggml_tensor* denoised = model(x, sigma, i + 1);
+                if (denoised == NULL) {
+                    return false;
+                }
 
                 // d = (x - denoised) / sigma
                 {
@@ -594,6 +600,9 @@ static void sample_k_diffusion(sample_method_t method,
             for (int i = 0; i < steps; i++) {
                 // denoise
                 ggml_tensor* denoised = model(x, sigmas[i], -(i + 1));
+                if (denoised == NULL) {
+                    return false;
+                }
 
                 // d = (x - denoised) / sigma
                 {
@@ -628,7 +637,10 @@ static void sample_k_diffusion(sample_method_t method,
                     }
 
                     ggml_tensor* denoised = model(x2, sigmas[i + 1], i + 1);
-                    float* vec_denoised   = (float*)denoised->data;
+                    if (denoised == NULL) {
+                        return false;
+                    }
+                    float* vec_denoised = (float*)denoised->data;
                     for (int j = 0; j < ggml_nelements(x); j++) {
                         float d2 = (vec_x2[j] - vec_denoised[j]) / sigmas[i + 1];
                         vec_d[j] = (vec_d[j] + d2) / 2;
@@ -644,6 +656,9 @@ static void sample_k_diffusion(sample_method_t method,
             for (int i = 0; i < steps; i++) {
                 // denoise
                 ggml_tensor* denoised = model(x, sigmas[i], i + 1);
+                if (denoised == NULL) {
+                    return false;
+                }
 
                 // d = (x - denoised) / sigma
                 {
@@ -680,7 +695,10 @@ static void sample_k_diffusion(sample_method_t method,
                     }
 
                     ggml_tensor* denoised = model(x2, sigma_mid, i + 1);
-                    float* vec_denoised   = (float*)denoised->data;
+                    if (denoised == NULL) {
+                        return false;
+                    }
+                    float* vec_denoised = (float*)denoised->data;
                     for (int j = 0; j < ggml_nelements(x); j++) {
                         float d2 = (vec_x2[j] - vec_denoised[j]) / sigma_mid;
                         vec_x[j] = vec_x[j] + d2 * dt_2;
@@ -697,6 +715,9 @@ static void sample_k_diffusion(sample_method_t method,
             for (int i = 0; i < steps; i++) {
                 // denoise
                 ggml_tensor* denoised = model(x, sigmas[i], i + 1);
+                if (denoised == NULL) {
+                    return false;
+                }
 
                 // get_ancestral_step
                 float sigma_up   = std::min(sigmas[i + 1],
@@ -741,6 +762,9 @@ static void sample_k_diffusion(sample_method_t method,
                     }
 
                     ggml_tensor* denoised = model(x2, sigmas[i + 1], i + 1);
+                    if (denoised == NULL) {
+                        return false;
+                    }
 
                     // Second half-step
                     for (int j = 0; j < ggml_nelements(x); j++) {
@@ -771,6 +795,9 @@ static void sample_k_diffusion(sample_method_t method,
             for (int i = 0; i < steps; i++) {
                 // denoise
                 ggml_tensor* denoised = model(x, sigmas[i], i + 1);
+                if (denoised == NULL) {
+                    return false;
+                }
 
                 float t                 = t_fn(sigmas[i]);
                 float t_next            = t_fn(sigmas[i + 1]);
@@ -810,6 +837,9 @@ static void sample_k_diffusion(sample_method_t method,
             for (int i = 0; i < steps; i++) {
                 // denoise
                 ggml_tensor* denoised = model(x, sigmas[i], i + 1);
+                if (denoised == NULL) {
+                    return false;
+                }
 
                 float t                 = t_fn(sigmas[i]);
                 float t_next            = t_fn(sigmas[i + 1]);
@@ -860,7 +890,10 @@ static void sample_k_diffusion(sample_method_t method,
 
                 // Denoising step
                 ggml_tensor* denoised = model(x_cur, sigma, i + 1);
-                float* vec_denoised   = (float*)denoised->data;
+                if (denoised == NULL) {
+                    return false;
+                }
+                float* vec_denoised = (float*)denoised->data;
                 // d_cur = (x_cur - denoised) / sigma
                 struct ggml_tensor* d_cur = ggml_dup_tensor(work_ctx, x_cur);
                 float* vec_d_cur          = (float*)d_cur->data;
@@ -1003,6 +1036,9 @@ static void sample_k_diffusion(sample_method_t method,
 
                 // denoise
                 ggml_tensor* denoised = model(x, sigma, i + 1);
+                if (denoised == NULL) {
+                    return false;
+                }
 
                 // x = denoised
                 {
@@ -1129,6 +1165,9 @@ static void sample_k_diffusion(sample_method_t method,
                 // p. 8 (7), compare also p. 38 (226) therein.
                 struct ggml_tensor* model_output =
                     model(x, sigma, i + 1);
+                if (model_output == NULL) {
+                    return false;
+                }
                 // Here model_output is still the k-diffusion denoiser
                 // output, not the U-net output F_theta(c_in(sigma) x;
                 // ...) in Karras et al. (2022), whereas Diffusers'
@@ -1288,6 +1327,9 @@ static void sample_k_diffusion(sample_method_t method,
                 }
                 struct ggml_tensor* model_output =
                     model(x, sigma, i + 1);
+                if (model_output == NULL) {
+                    return false;
+                }
                 {
                     float* vec_x = (float*)x->data;
                     float* vec_model_output =
@@ -1395,8 +1437,9 @@ static void sample_k_diffusion(sample_method_t method,
 
         default:
             LOG_ERROR("Attempting to sample with nonexisting sample method %i", method);
-            abort();
+            return false;
     }
+    return true;
 }
 
 #endif  // __DENOISER_HPP__

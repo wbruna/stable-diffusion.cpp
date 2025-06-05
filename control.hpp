@@ -410,7 +410,7 @@ struct ControlNet : public GGMLRunner {
         return gf;
     }
 
-    void compute(int n_threads,
+    bool compute(int n_threads,
                  struct ggml_tensor* x,
                  struct ggml_tensor* hint,
                  struct ggml_tensor* timesteps,
@@ -426,8 +426,11 @@ struct ControlNet : public GGMLRunner {
             return build_graph(x, hint, timesteps, context, y);
         };
 
-        GGMLRunner::compute(get_graph, n_threads, false, output, output_ctx);
+        if (!GGMLRunner::compute(get_graph, n_threads, false, output, output_ctx)) {
+            return false;
+        }
         guided_hint_cached = true;
+        return true;
     }
 
     bool load_from_file(const std::string& file_path) {

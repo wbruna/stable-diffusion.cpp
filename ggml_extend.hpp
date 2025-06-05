@@ -383,19 +383,19 @@ __STATIC_INLINE__ void sd_apply_mask(struct ggml_tensor* image_data,
             ggml_tensor_set_f32(mask, m, ix, iy);
         }
     }
-    float rescale_mx = mask->ne[0]/output->ne[0];
-    float rescale_my = mask->ne[1]/output->ne[1];
+    float rescale_mx = mask->ne[0] / output->ne[0];
+    float rescale_my = mask->ne[1] / output->ne[1];
     GGML_ASSERT(output->type == GGML_TYPE_F32);
     for (int ix = 0; ix < width; ix++) {
         for (int iy = 0; iy < height; iy++) {
-            int mx = (int)(ix * rescale_mx);
-            int my = (int)(iy * rescale_my);
+            int mx  = (int)(ix * rescale_mx);
+            int my  = (int)(iy * rescale_my);
             float m = ggml_tensor_get_f32(mask, mx, my);
             m       = round(m);  // inpaint models need binary masks
             ggml_tensor_set_f32(mask, m, mx, my);
             for (int k = 0; k < channels; k++) {
                 float value = ggml_tensor_get_f32(image_data, ix, iy, k);
-                value = (1 - m) * (value - masked_value) + masked_value;
+                value       = (1 - m) * (value - masked_value) + masked_value;
                 ggml_tensor_set_f32(output, value, ix, iy, k);
             }
         }
@@ -1319,12 +1319,14 @@ public:
         }
     }
 
-    void compute(get_graph_cb_t get_graph,
+    bool compute(get_graph_cb_t get_graph,
                  int n_threads,
                  bool free_compute_buffer_immediately = true,
                  struct ggml_tensor** output          = NULL,
                  struct ggml_context* output_ctx      = NULL) {
-        alloc_compute_buffer(get_graph);
+        if (!alloc_compute_buffer(get_graph)) {
+            return false;
+        }
         reset_compute_ctx();
         struct ggml_cgraph* gf = get_graph();
         GGML_ASSERT(ggml_gallocr_alloc_graph(compute_allocr, gf));
@@ -1382,6 +1384,7 @@ public:
         if (free_compute_buffer_immediately) {
             free_compute_buffer();
         }
+        return true;
     }
 };
 

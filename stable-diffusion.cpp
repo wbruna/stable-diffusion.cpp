@@ -982,8 +982,6 @@ public:
                         ggml_tensor* denoise_mask = NULL) {
         std::vector<int> skip_layers(guidance.slg.layers, guidance.slg.layers + guidance.slg.layer_count);
 
-        // TODO (Pix2Pix): separate image guidance params (right now it's reusing distilled guidance)
-
         float cfg_scale     = guidance.txt_cfg;
         float img_cfg_scale = guidance.img_cfg;
         float slg_scale     = guidance.slg.scale;
@@ -1318,7 +1316,15 @@ public:
             return denoised;
         };
 
-        sample_k_diffusion(method, denoise, work_ctx, x, sigmas, rng, eta);
+        if (!sample_k_diffusion(method, denoise, work_ctx, x, sigmas, rng, eta)) {
+            LOG_ERROR("Diffusion model sampling failed");
+            if (control_net) {
+                control_net->free_control_ctx();
+                control_net->free_compute_buffer();
+            }
+            diffusion_model->free_compute_buffer();
+            return NULL;
+        }
 
         x = denoiser->inverse_noise_scaling(sigmas[sigmas.size() - 1], x);
 
