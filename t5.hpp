@@ -815,6 +815,10 @@ struct T5Runner : public GGMLRunner {
 
         relative_position_bucket_vec = compute_relative_position_bucket(input_ids->ne[0], input_ids->ne[0]);
 
+        if(attention_mask){
+            attention_mask = to_backend(attention_mask);
+        }
+
         // for (int i = 0; i < relative_position_bucket_vec.size(); i++) {
         //     if (i % 77 == 0) {
         //         printf("\n");
