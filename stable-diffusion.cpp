@@ -1489,6 +1489,18 @@ public:
                 LOG_WARN("OOR");
             }
         }
+        float tile_overlap = 0.5f;
+        const char* SD_TILE_OVERLAP = getenv("SD_TILE_OVERLAP");
+        if (SD_TILE_OVERLAP != nullptr) {
+            std::string sd_tile_overlap_str = SD_TILE_OVERLAP;
+            try {
+                tile_overlap = std::stof(sd_tile_overlap_str);
+            } catch (const std::invalid_argument&) {
+                LOG_WARN("Invalid");
+            } catch (const std::out_of_range&) {
+                LOG_WARN("OOR");
+            }
+        }
         if(!decode){
             // TODO: also use and arg for this one?
             // to keep the compute buffer size consistent
@@ -1505,11 +1517,14 @@ public:
                 if (SD_TILE_SIZE != nullptr) {
                     LOG_INFO("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
                 }
+                if (SD_TILE_OVERLAP != nullptr) {
+                    LOG_INFO("VAE Tile overlap: %.2f", tile_overlap);
+                }
                 // split latent in 32x32 tiles and compute in several steps
                 auto on_tiling = [&](ggml_tensor* in, ggml_tensor* out, bool init) {
                     first_stage_model->compute(n_threads, in, decode, &out);
                 };
-                sd_tiling_non_square(x, result, 8, tile_size_x, tile_size_y, 0.5f, on_tiling);
+                sd_tiling_non_square(x, result, 8, tile_size_x, tile_size_y, tile_overlap, on_tiling);
             } else {
                 first_stage_model->compute(n_threads, x, decode, &result);
             }
