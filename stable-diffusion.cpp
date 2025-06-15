@@ -1427,13 +1427,30 @@ public:
                                                  x->ne[3]);  // channels
         int64_t t0          = ggml_time_ms();
 
-        int tile_size = 32;
+        int tile_size_x = 32;
+        int tile_size_y = 32;
         // TODO: arg instead of env?
         const char* SD_TILE_SIZE = getenv("SD_TILE_SIZE");
         if (SD_TILE_SIZE != nullptr) {
             std::string sd_tile_size_str = SD_TILE_SIZE;
+            size_t dot_pos = sd_tile_size_str.find('.');
+            size_t x_pos = sd_tile_size_str.find('x');
             try {
-                tile_size = std::stoi(sd_tile_size_str);
+                if (dot_pos != std::string::npos) {
+                    float factor = std::stof(sd_tile_size_str);
+                    tile_size_x = W * (decode ? 8 : 1) / factor;
+                    tile_size_y = H * (decode ? 8 : 1) / factor;
+                }
+                else {
+                    int tmp = std::stoi(sd_tile_size_str.substr(0, x_pos));
+                    if (x_pos != std::string::npos) {
+                        tile_size_y = std::stoi(sd_tile_size_str.substr(x_pos + 1));
+                    }
+                    else {
+                        tile_size_y = tmp;
+                    }
+                    tile_size_x = tmp;
+                }
             } catch (const std::invalid_argument&) {
                 LOG_WARN("Invalid");
             } catch (const std::out_of_range&) {
@@ -1443,7 +1460,8 @@ public:
         if(!decode){
             // TODO: also use and arg for this one?
             // to keep the compute buffer size consistent
-            tile_size*=1.30539;
+            tile_size_x*=1.30539;
+            tile_size_y*=1.30539;
         }
         if (!use_tiny_autoencoder) {
             if (decode) {
@@ -1452,11 +1470,14 @@ public:
                 ggml_tensor_scale_input(x);
             }
             if (vae_tiling) {
+                if (SD_TILE_SIZE != nullptr) {
+                    LOG_INFO("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
+                }
                 // split latent in 32x32 tiles and compute in several steps
                 auto on_tiling = [&](ggml_tensor* in, ggml_tensor* out, bool init) {
                     first_stage_model->compute(n_threads, in, decode, &out);
                 };
-                sd_tiling(x, result, 8, tile_size, 0.5f, on_tiling);
+                sd_tiling_non_square(x, result, 8, tile_size_x, tile_size_y, 0.5f, on_tiling);
             } else {
                 first_stage_model->compute(n_threads, x, decode, &result);
             }
