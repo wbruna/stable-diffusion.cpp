@@ -1439,9 +1439,9 @@ public:
                     LOG_WARN("SD_TILE_OVERLAP too low, setting it to 0.0");
                     tile_overlap = 0.0;
                 }
-                else if (tile_overlap > 0.95) {
-                    LOG_WARN("SD_TILE_OVERLAP too high, setting it to 0.95");
-                    tile_overlap = 0.95;
+                else if (tile_overlap > 0.5) {
+                    LOG_WARN("SD_TILE_OVERLAP too high, setting it to 0.5");
+                    tile_overlap = 0.5;
                 }
             } catch (const std::invalid_argument&) {
                 LOG_WARN("SD_TILE_OVERLAP is invalid, keeping the default");
