@@ -1427,9 +1427,31 @@ public:
                                                  x->ne[3]);  // channels
         int64_t t0          = ggml_time_ms();
 
+        // TODO: args instead of env for tile size / overlap?
+
+        float tile_overlap = 0.5f;
+        const char* SD_TILE_OVERLAP = getenv("SD_TILE_OVERLAP");
+        if (SD_TILE_OVERLAP != nullptr) {
+            std::string sd_tile_overlap_str = SD_TILE_OVERLAP;
+            try {
+                tile_overlap = std::stof(sd_tile_overlap_str);
+                if (tile_overlap < 0.0) {
+                    LOG_WARN("SD_TILE_OVERLAP too low, setting it to 0.0");
+                    tile_overlap = 0.0;
+                }
+                else if (tile_overlap > 0.95) {
+                    LOG_WARN("SD_TILE_OVERLAP too high, setting it to 0.95");
+                    tile_overlap = 0.95;
+                }
+            } catch (const std::invalid_argument&) {
+                LOG_WARN("SD_TILE_OVERLAP is invalid, keeping the default");
+            } catch (const std::out_of_range&) {
+                LOG_WARN("SD_TILE_OVERLAP is out of range, keeping the default");
+            }
+        }
+
         int tile_size_x = 32;
         int tile_size_y = 32;
-        // TODO: arg instead of env?
         const char* SD_TILE_SIZE = getenv("SD_TILE_SIZE");
         if (SD_TILE_SIZE != nullptr) {
             // format is AxB, or just A (equivalent to AxA)
@@ -1484,23 +1506,12 @@ public:
                 tile_size_x = tmp_x;
                 tile_size_y = tmp_y;
             } catch (const std::invalid_argument&) {
-                LOG_WARN("Invalid");
+                LOG_WARN("SD_TILE_SIZE is invalid, keeping the default");
             } catch (const std::out_of_range&) {
-                LOG_WARN("OOR");
+                LOG_WARN("SD_TILE_SIZE is out of range, keeping the default");
             }
         }
-        float tile_overlap = 0.5f;
-        const char* SD_TILE_OVERLAP = getenv("SD_TILE_OVERLAP");
-        if (SD_TILE_OVERLAP != nullptr) {
-            std::string sd_tile_overlap_str = SD_TILE_OVERLAP;
-            try {
-                tile_overlap = std::stof(sd_tile_overlap_str);
-            } catch (const std::invalid_argument&) {
-                LOG_WARN("Invalid");
-            } catch (const std::out_of_range&) {
-                LOG_WARN("OOR");
-            }
-        }
+
         if(!decode){
             // TODO: also use and arg for this one?
             // to keep the compute buffer size consistent
