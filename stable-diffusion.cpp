@@ -1456,9 +1456,18 @@ public:
         if (SD_TILE_SIZE != nullptr) {
             // format is AxB, or just A (equivalent to AxA)
             // A and B can be integers (tile size) or floating point
-            // floating point <= 1 means fraction of the latent dimension
-            // floating point > 1 means number of tiles in that dimension
-            // a single number gets applied to both dimensions
+            // floating point <= 1 means simple fraction of the latent dimension
+            // floating point > 1 means number of tiles across that dimension
+            // a single number gets applied to both
+            auto get_tile_factor = [tile_overlap](const std::string& factor_str) {
+                float factor = std::stof(factor_str);
+                if (factor > 1.0)
+                    factor = 1 / (factor - factor * tile_overlap + tile_overlap);
+                return factor;
+            };
+            const int latent_x = W / (decode ? 1 : 8);
+            const int latent_y = H / (decode ? 1 : 8);
+            const int min_tile_dimension = 4;
             std::string sd_tile_size_str = SD_TILE_SIZE;
             size_t x_pos = sd_tile_size_str.find('x');
             try {
@@ -1467,23 +1476,13 @@ public:
                     std::string tile_x_str = sd_tile_size_str.substr(0, x_pos);
                     std::string tile_y_str = sd_tile_size_str.substr(x_pos + 1);
                     if (tile_x_str.find('.') != std::string::npos) {
-                        float tile_factor = std::stof(tile_x_str);
-                        if (tile_factor > 0.0) {
-                            if (tile_factor > 1.0)
-                                tile_factor = 1.0 / tile_factor;
-                            tmp_x = (W / (decode ? 1 : 8)) * tile_factor;
-                        }
+                        tmp_x = latent_x * get_tile_factor(tile_x_str);
                     }
                     else {
                         tmp_x = std::stoi(tile_x_str);
                     }
                     if (tile_y_str.find('.') != std::string::npos) {
-                        float tile_factor = std::stof(tile_y_str);
-                        if (tile_factor > 0.0) {
-                            if (tile_factor > 1.0)
-                                tile_factor = 1.0 / tile_factor;
-                            tmp_y = (H / (decode ? 1 : 8)) * tile_factor;
-                        }
+                        tmp_y = latent_y * get_tile_factor(tile_y_str);
                     }
                     else {
                         tmp_y = std::stoi(tile_y_str);
@@ -1491,20 +1490,16 @@ public:
                 }
                 else {
                     if (sd_tile_size_str.find('.') != std::string::npos) {
-                        float tile_factor = std::stof(sd_tile_size_str);
-                        if (tile_factor > 0) {
-                            if (tile_factor > 1.0)
-                                tile_factor = 1.0 / tile_factor;
-                            tmp_x = (W / (decode ? 1 : 8)) * tile_factor;
-                            tmp_y = (H / (decode ? 1 : 8)) * tile_factor;
-                        }
+                        float tile_factor = get_tile_factor(sd_tile_size_str);
+                        tmp_x = latent_x * tile_factor;
+                        tmp_y = latent_y * tile_factor;
                     }
                     else {
                         tmp_x = tmp_y = std::stoi(sd_tile_size_str);
                     }
                 }
-                tile_size_x = tmp_x;
-                tile_size_y = tmp_y;
+                tile_size_x = std::max(std::min(tmp_x, latent_x), min_tile_dimension);
+                tile_size_y = std::max(std::min(tmp_y, latent_y), min_tile_dimension);
             } catch (const std::invalid_argument&) {
                 LOG_WARN("SD_TILE_SIZE is invalid, keeping the default");
             } catch (const std::out_of_range&) {
