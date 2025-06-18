@@ -1476,13 +1476,13 @@ public:
                     std::string tile_x_str = sd_tile_size_str.substr(0, x_pos);
                     std::string tile_y_str = sd_tile_size_str.substr(x_pos + 1);
                     if (tile_x_str.find('.') != std::string::npos) {
-                        tmp_x = latent_x * get_tile_factor(tile_x_str);
+                        tmp_x = std::round(latent_x * get_tile_factor(tile_x_str));
                     }
                     else {
                         tmp_x = std::stoi(tile_x_str);
                     }
                     if (tile_y_str.find('.') != std::string::npos) {
-                        tmp_y = latent_y * get_tile_factor(tile_y_str);
+                        tmp_y = std::round(latent_y * get_tile_factor(tile_y_str));
                     }
                     else {
                         tmp_y = std::stoi(tile_y_str);
@@ -1491,8 +1491,8 @@ public:
                 else {
                     if (sd_tile_size_str.find('.') != std::string::npos) {
                         float tile_factor = get_tile_factor(sd_tile_size_str);
-                        tmp_x = latent_x * tile_factor;
-                        tmp_y = latent_y * tile_factor;
+                        tmp_x = std::round(latent_x * tile_factor);
+                        tmp_y = std::round(latent_y * tile_factor);
                     }
                     else {
                         tmp_x = tmp_y = std::stoi(sd_tile_size_str);
