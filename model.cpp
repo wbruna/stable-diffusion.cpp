@@ -837,6 +837,35 @@ void i64_to_i32_vec(int64_t* src, int32_t* dst, int64_t n) {
     }
 }
 
+#if 1
+
+#define SD_GGML_FP16_TO_FP32_ROW(S,D,N)\
+    ggml_fp16_to_fp32_row((ggml_fp16_t*)(S), (float*)(D),(N));
+
+#elif 0
+
+#include "ggml/src/ggml-impl.h"
+static void sd_ggml_fp16_to_fp32_row(const ggml_fp16_t * x, float * y, int64_t n) {
+    for (int i = 0; i < n; i++) {
+        y[i] = GGML_FP16_TO_FP32(x[i]);
+    }
+}
+#define SD_GGML_FP16_TO_FP32_ROW(S,D,N)\
+  sd_ggml_fp16_to_fp32_row((const ggml_fp16_t *)(S),(float *)(D),(N))
+#else
+
+#include "fp16/fp16.h"
+
+static void sd_ggml_fp16_to_fp32_row_alt(const uint16_t * x, uint32_t * y, int n) {
+    for (int i = 0; i < n; i++) {
+        y[i] = fp16_ieee_to_fp32_bits(x[i]);
+    }
+}
+#define SD_GGML_FP16_TO_FP32_ROW(S,D,N)\
+  sd_ggml_fp16_to_fp32_row_alt((const uint16_t*)(S),(uint32_t*)(D),(N))
+
+#endif
+
 void convert_tensor(void* src,
                     ggml_type src_type,
                     void* dst,
@@ -857,7 +886,8 @@ void convert_tensor(void* src,
         }
     } else if (dst_type == GGML_TYPE_F32) {
         if (src_type == GGML_TYPE_F16) {
-            ggml_fp16_to_fp32_row((ggml_fp16_t*)src, (float*)dst, n);
+            //ggml_fp16_to_fp32_row((ggml_fp16_t*)src, (float*)dst, n);
+            SD_GGML_FP16_TO_FP32_ROW(src, dst, n);
         } else {
             auto qtype = ggml_get_type_traits(src_type);
             if (qtype->to_float == NULL) {
@@ -1872,6 +1902,7 @@ std::vector<TensorStorage> remove_duplicates(const std::vector<TensorStorage>& v
 }
 
 bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, ggml_backend_t backend) {
+
     std::vector<TensorStorage> processed_tensor_storages;
     for (auto& tensor_storage : tensor_storages) {
         // LOG_DEBUG("%s", name.c_str());
@@ -2065,6 +2096,7 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, ggml_backend
             break;
         }
     }
+
     return success;
 }
 

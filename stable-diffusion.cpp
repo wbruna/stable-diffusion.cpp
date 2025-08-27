@@ -16,6 +16,8 @@
 #include "tae.hpp"
 #include "vae.hpp"
 
+#include <valgrind/callgrind.h>
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC
 #include "stb_image.h"
@@ -492,7 +494,15 @@ public:
         if (version == VERSION_SVD) {
             ignore_tensors.insert("conditioner.embedders.3");
         }
+
+CALLGRIND_START_INSTRUMENTATION;
+CALLGRIND_TOGGLE_COLLECT;
+
         bool success = model_loader.load_tensors(tensors, backend, ignore_tensors);
+
+CALLGRIND_TOGGLE_COLLECT;
+CALLGRIND_STOP_INSTRUMENTATION;
+
         if (!success) {
             LOG_ERROR("load tensors from model loader failed");
             ggml_free(ctx);
