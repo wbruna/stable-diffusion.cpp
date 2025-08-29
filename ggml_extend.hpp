@@ -903,6 +903,7 @@ __STATIC_INLINE__ struct ggml_tensor* ggml_nn_attention_ext(struct ggml_context*
         if (kv_pad != 0) {
             // LOG_DEBUG(" padding k and v dim1 by %d", kv_pad);
             k = ggml_pad(ctx, k, 0, kv_pad, 0, 0);
+            scale *= sqrt((float)(L_k + kv_pad) / (float)L_k);
         }
         k = ggml_cast(ctx, k, GGML_TYPE_F16);
 
