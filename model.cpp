@@ -1872,6 +1872,16 @@ std::vector<TensorStorage> remove_duplicates(const std::vector<TensorStorage>& v
 }
 
 bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, ggml_backend_t backend) {
+
+    int postpone_device = -1;
+    const char * postpone_param = getenv("SD_TEST_POSTPONE_DEVICE_LOADING");
+    if (postpone_param != nullptr) {
+        postpone_device = atoi(postpone_param);
+        if (postpone_device < 0 || postpone_device > 2)
+            postpone_device = -1;
+        LOG_INFO("SD_TEST_POSTPONE_DEVICE_LOADING=%d", postpone_device);
+    }
+
     std::vector<TensorStorage> processed_tensor_storages;
     for (auto& tensor_storage : tensor_storages) {
         // LOG_DEBUG("%s", name.c_str());
@@ -1942,11 +1952,15 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, ggml_backend
             return true;
         };
         int tensor_count = 0;
+        int tensor_cnt_1 = 0;
         int64_t t0       = ggml_time_ms();
         int64_t t1       = t0;
         bool partial     = true;
         int tensor_max   = (int)processed_tensor_storages.size();
         pretty_progress(0, tensor_max, 0.0f);
+
+        std::vector<std::pair<ggml_tensor*, std::vector<uint8_t> > > postponed;
+
         for (auto& tensor_storage : processed_tensor_storages) {
             if (tensor_storage.file_index != file_index) {
                 ++tensor_count;
@@ -2038,15 +2052,27 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, ggml_backend
                 }
 
                 if (tensor_storage.type == dst_tensor->type) {
-                    // copy to device memory
-                    ggml_backend_tensor_set(dst_tensor, read_buffer.data(), 0, ggml_nbytes(dst_tensor));
+                    if (postpone_device >= 2) {
+                        postponed.emplace_back(dst_tensor, std::move(read_buffer));
+                    }
+                    else {
+                        // copy to device memory
+                        ggml_backend_tensor_set(dst_tensor, read_buffer.data(), 0, ggml_nbytes(dst_tensor));
+                        tensor_cnt_1++;
+                    }
                 } else {
                     // convert first, then copy to device memory
                     convert_buffer.resize(ggml_nbytes(dst_tensor));
                     convert_tensor((void*)read_buffer.data(), tensor_storage.type,
                                    (void*)convert_buffer.data(), dst_tensor->type,
                                    (int)tensor_storage.nelements() / (int)tensor_storage.ne[0], (int)tensor_storage.ne[0]);
-                    ggml_backend_tensor_set(dst_tensor, convert_buffer.data(), 0, ggml_nbytes(dst_tensor));
+                    if (postpone_device >= 1) {
+                        postponed.emplace_back(dst_tensor, std::move(convert_buffer));
+                    }
+                    else {
+                        ggml_backend_tensor_set(dst_tensor, convert_buffer.data(), 0, ggml_nbytes(dst_tensor));
+                        tensor_cnt_1++;
+                    }
                 }
             }
             ++tensor_count;
@@ -2075,6 +2101,33 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, ggml_backend
         if (!success) {
             break;
         }
+
+        if (postpone_device >= 0) {
+
+            LOG_INFO("loaded %d tensors to device memory in %.3fms (phase 1)", tensor_cnt_1, (t1 - t0) / 1000.0f);
+
+            if (postponed.size() > 0) {
+                int tensor_cnt_2 = 0;
+                int64_t t3       = t1;
+                t1               = t3;
+                int tensor_max   = (int)postponed.size();
+                pretty_progress(0, tensor_max, 0.0f);
+                for (auto& tensor : postponed) {
+                    ggml_backend_tensor_set(tensor.first, tensor.second.data(), 0, ggml_nbytes(tensor.first));
+                    ++tensor_cnt_2;
+                    int64_t t2 = ggml_time_ms();
+                    if ((t2 - t1) >= 200) {
+                        t1 = t2;
+                        pretty_progress(tensor_cnt_2, tensor_max, (t1 - t3) / (1000.0f * tensor_cnt_2));
+                    }
+                }
+
+                t1 = ggml_time_ms();
+                pretty_progress(tensor_cnt_2, tensor_max, (t1 - t3) / (1000.0f * tensor_cnt_2));
+                LOG_INFO("loaded %d tensors to device memory in %.3fms (phase 2)", tensor_cnt_2, (t1 - t3) / 1000.0f);
+            }
+        }
+
     }
     return success;
 }
