@@ -294,10 +294,12 @@ bool parse_options(int argc, const char** argv, ArgOptions& options) {
     bool invalid_arg = false;
     std::string arg;
     for (int i = 1; i < argc; i++) {
+        bool found_arg = false;
         arg = argv[i];
 
         for (auto& option : options.string_options) {
             if ((option.short_name.size() > 0 && arg == option.short_name) || (option.long_name.size() > 0 && arg == option.long_name)) {
+                found_arg = true;
                 if (++i >= argc) {
                     invalid_arg = true;
                     break;
@@ -311,6 +313,7 @@ bool parse_options(int argc, const char** argv, ArgOptions& options) {
 
         for (auto& option : options.int_options) {
             if ((option.short_name.size() > 0 && arg == option.short_name) || (option.long_name.size() > 0 && arg == option.long_name)) {
+                found_arg = true;
                 if (++i >= argc) {
                     invalid_arg = true;
                     break;
@@ -324,6 +327,7 @@ bool parse_options(int argc, const char** argv, ArgOptions& options) {
 
         for (auto& option : options.float_options) {
             if ((option.short_name.size() > 0 && arg == option.short_name) || (option.long_name.size() > 0 && arg == option.long_name)) {
+                found_arg = true;
                 if (++i >= argc) {
                     invalid_arg = true;
                     break;
@@ -337,6 +341,7 @@ bool parse_options(int argc, const char** argv, ArgOptions& options) {
 
         for (auto& option : options.bool_options) {
             if ((option.short_name.size() > 0 && arg == option.short_name) || (option.long_name.size() > 0 && arg == option.long_name)) {
+                found_arg = true;
                 if (option.keep_true) {
                     *option.target = true;
                 } else {
@@ -350,6 +355,7 @@ bool parse_options(int argc, const char** argv, ArgOptions& options) {
 
         for (auto& option : options.manual_options) {
             if ((option.short_name.size() > 0 && arg == option.short_name) || (option.long_name.size() > 0 && arg == option.long_name)) {
+                found_arg = true;
                 int ret = option.cb(argc, argv, i);
                 if (ret < 0) {
                     invalid_arg = true;
@@ -360,6 +366,10 @@ bool parse_options(int argc, const char** argv, ArgOptions& options) {
         }
         if (invalid_arg) {
             break;
+        }
+        if (!found_arg) {
+            fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());    
+            return false;
         }
     }
     if (invalid_arg) {
@@ -430,7 +440,7 @@ void parse_args(int argc, const char** argv, SDParams& params) {
         {"", "--diffusion-conv-direct", "", true, &params.diffusion_conv_direct},
         {"", "--vae-conv-direct", "", true, &params.vae_conv_direct},
         {"", "--canny", "", true, &params.canny_preprocess},
-        {"-v", "--verbos", "", true, &params.verbose},
+        {"-v", "--verbose", "", true, &params.verbose},
         {"", "--color", "", true, &params.color},
         {"", "--chroma-disable-dit-mask", "", false, &params.chroma_use_dit_mask},
         {"", "--chroma-enable-t5-mask", "", true, &params.chroma_use_t5_mask},
