@@ -16,9 +16,12 @@
 #include "tae.hpp"
 #include "vae.hpp"
 
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_STATIC
+// #define STB_IMAGE_IMPLEMENTATION
+// #define STB_IMAGE_STATIC
 #include "stb_image.h"
+
+#include <inttypes.h>
+#include <cinttypes>
 
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #define STB_IMAGE_WRITE_STATIC
@@ -186,6 +189,8 @@ public:
 
         init_backend();
 
+        std::string taesd_path_fixed = taesd_path;
+
         ModelLoader model_loader;
 
         if (strlen(SAFE_STR(sd_ctx_params->model_path)) > 0) {
@@ -235,12 +240,57 @@ public:
         }
 
         version = model_loader.get_sd_version();
+
+        // kcpp fallback to separate diffusion model passed as model
+        if (version == VERSION_COUNT &&
+            strlen(SAFE_STR(sd_ctx_params->model_path)) > 0 &&
+            strlen(SAFE_STR(sd_ctx_params->diffusion_model_path)) == 0 &&
+            strlen(SAFE_STR(sd_ctx_params->t5xxl_path)) > 0 )
+        {
+            bool endswithsafetensors = ends_with(sd_ctx_params->model_path, ".safetensors");
+            if(endswithsafetensors && !model_loader.has_diffusion_model_tensors())
+            {
+                LOG_INFO("SD Diffusion Model tensors missing! Fallback trying alternative tensor names...\n");
+                if (!model_loader.init_from_file(sd_ctx_params->model_path, "model.diffusion_model.")) {
+                    LOG_WARN("loading diffusion model from '%s' failed", sd_ctx_params->model_path);
+                }
+                version = model_loader.get_sd_version();
+            }
+        }
+
         if (version == VERSION_COUNT) {
             LOG_ERROR("get sd version from file failed: '%s'", SAFE_STR(sd_ctx_params->model_path));
             return false;
         }
 
         LOG_INFO("Version: %s ", model_version_to_str[version]);
+
+        if(use_tiny_autoencoder)
+        {
+            std::string to_search = "taesd.embd";
+            std::string to_replace = "";
+            if(version==VERSION_SDXL)
+            {
+                to_replace = "taesd_xl.embd";
+            }
+            else if(version==VERSION_FLUX)
+            {
+                to_replace = "taesd_f.embd";
+            }
+            else if(version==VERSION_SD3)
+            {
+                to_replace = "taesd_3.embd";
+            }
+
+            if(to_replace!="")
+            {
+                size_t pos = taesd_path_fixed.find(to_search);
+                if (pos != std::string::npos) {
+                    taesd_path_fixed.replace(pos, to_search.length(), to_replace);
+                }
+            }
+        }
+
         ggml_type wtype = (ggml_type)sd_ctx_params->wtype;
         if (wtype == GGML_TYPE_COUNT) {
             model_wtype = model_loader.get_sd_wtype();
@@ -283,11 +333,11 @@ public:
 
         if (sd_version_is_sdxl(version)) {
             scale_factor = 0.13025f;
-            if (strlen(SAFE_STR(sd_ctx_params->vae_path)) == 0 && strlen(SAFE_STR(sd_ctx_params->taesd_path)) == 0) {
+            if (strlen(SAFE_STR(sd_ctx_params->vae_path)) == 0 && taesd_path_fixed.size() == 0) {
                 LOG_WARN(
                     "!!!It looks like you are using SDXL model. "
                     "If you find that the generated images are completely black, "
-                    "try specifying SDXL VAE FP16 Fix with the --vae parameter. "
+                    "try specifying a different VAE. "
                     "You can find it here: https://huggingface.co/madebyollin/sdxl-vae-fp16-fix/blob/main/sdxl_vae.safetensors");
             }
         } else if (sd_version_is_sd3(version)) {
@@ -440,6 +490,9 @@ public:
                 pmid_model = std::make_shared<PhotoMakerIDEncoder>(backend, model_loader.tensor_storages_types, "pmid", version);
             }
             if (strlen(SAFE_STR(sd_ctx_params->stacked_id_embed_dir)) > 0) {
+              if (version != VERSION_SDXL) {
+                printf("\n!!!!\nWARNING: PhotoMaker is only compatible with SDXL models. PhotoMaker will be disabled!\n!!!!\n");
+              } else {
                 pmid_lora = std::make_shared<LoraModel>(backend, sd_ctx_params->stacked_id_embed_dir, "");
                 if (!pmid_lora->load_from_file(true)) {
                     LOG_WARN("load photomaker lora tensors from %s failed", sd_ctx_params->stacked_id_embed_dir);
@@ -451,6 +504,7 @@ public:
                 } else {
                     stacked_id = true;
                 }
+              }
             }
             if (stacked_id) {
                 if (!pmid_model->alloc_params_buffer()) {
@@ -512,7 +566,7 @@ public:
             if (!use_tiny_autoencoder) {
                 vae_params_mem_size = first_stage_model->get_params_buffer_size();
             } else {
-                if (!tae_first_stage->load_from_file(taesd_path)) {
+                if (!tae_first_stage->load_from_file(taesd_path_fixed)) {
                     return false;
                 }
                 vae_params_mem_size = tae_first_stage->get_params_buffer_size();
@@ -700,6 +754,33 @@ public:
         int64_t t1 = ggml_time_ms();
         LOG_DEBUG("check is_using_v_parameterization_for_sd2, taking %.2fs", (t1 - t0) * 1.0f / 1000);
         return result < -1;
+    }
+
+    void apply_lora_from_file(const std::string& lora_path, float multiplier) {
+        int64_t t0                 = ggml_time_ms();
+        std::string st_file_path   = lora_path;
+        std::string file_path;
+        if (file_exists(st_file_path)) {
+            file_path = st_file_path;
+        } else {
+            LOG_WARN("can not find %s for lora %s", st_file_path.c_str(), lora_path.c_str());
+            return;
+        }
+        LoraModel lora(backend, file_path);
+        if (!lora.load_from_file()) {
+            LOG_WARN("load lora tensors from %s failed", file_path.c_str());
+            return;
+        }
+
+        lora.multiplier = multiplier;
+        lora.apply(tensors, version, n_threads);
+        lora.free_params_buffer();
+
+        int64_t t1 = ggml_time_ms();
+
+        LOG_INFO("lora '%s' applied, taking %.2fs",
+                 lora_path.c_str(),
+                 (t1 - t0) * 1.0f / 1000);
     }
 
     void apply_lora(const std::string& lora_name, float multiplier) {
@@ -1162,18 +1243,111 @@ public:
                                                  decode ? 3 : C,
                                                  x->ne[3]);  // channels
         int64_t t0          = ggml_time_ms();
+
+        // TODO: args instead of env for tile size / overlap?
+
+        float tile_overlap = 0.5f;
+        const char* SD_TILE_OVERLAP = getenv("SD_TILE_OVERLAP");
+        if (SD_TILE_OVERLAP != nullptr) {
+            std::string sd_tile_overlap_str = SD_TILE_OVERLAP;
+            try {
+                tile_overlap = std::stof(sd_tile_overlap_str);
+                if (tile_overlap < 0.0) {
+                    LOG_WARN("SD_TILE_OVERLAP too low, setting it to 0.0");
+                    tile_overlap = 0.0;
+                }
+                else if (tile_overlap > 0.5) {
+                    LOG_WARN("SD_TILE_OVERLAP too high, setting it to 0.5");
+                    tile_overlap = 0.5;
+                }
+            } catch (const std::invalid_argument&) {
+                LOG_WARN("SD_TILE_OVERLAP is invalid, keeping the default");
+            } catch (const std::out_of_range&) {
+                LOG_WARN("SD_TILE_OVERLAP is out of range, keeping the default");
+            }
+        }
+
+        int tile_size_x = 32;
+        int tile_size_y = 32;
+        const char* SD_TILE_SIZE = getenv("SD_TILE_SIZE");
+        if (SD_TILE_SIZE != nullptr) {
+            // format is AxB, or just A (equivalent to AxA)
+            // A and B can be integers (tile size) or floating point
+            // floating point <= 1 means simple fraction of the latent dimension
+            // floating point > 1 means number of tiles across that dimension
+            // a single number gets applied to both
+            auto get_tile_factor = [tile_overlap](const std::string& factor_str) {
+                float factor = std::stof(factor_str);
+                if (factor > 1.0)
+                    factor = 1 / (factor - factor * tile_overlap + tile_overlap);
+                return factor;
+            };
+            const int latent_x = W / (decode ? 1 : 8);
+            const int latent_y = H / (decode ? 1 : 8);
+            const int min_tile_dimension = 4;
+            std::string sd_tile_size_str = SD_TILE_SIZE;
+            size_t x_pos = sd_tile_size_str.find('x');
+            try {
+                int tmp_x = tile_size_x, tmp_y = tile_size_y;
+                if (x_pos != std::string::npos) {
+                    std::string tile_x_str = sd_tile_size_str.substr(0, x_pos);
+                    std::string tile_y_str = sd_tile_size_str.substr(x_pos + 1);
+                    if (tile_x_str.find('.') != std::string::npos) {
+                        tmp_x = std::round(latent_x * get_tile_factor(tile_x_str));
+                    }
+                    else {
+                        tmp_x = std::stoi(tile_x_str);
+                    }
+                    if (tile_y_str.find('.') != std::string::npos) {
+                        tmp_y = std::round(latent_y * get_tile_factor(tile_y_str));
+                    }
+                    else {
+                        tmp_y = std::stoi(tile_y_str);
+                    }
+                }
+                else {
+                    if (sd_tile_size_str.find('.') != std::string::npos) {
+                        float tile_factor = get_tile_factor(sd_tile_size_str);
+                        tmp_x = std::round(latent_x * tile_factor);
+                        tmp_y = std::round(latent_y * tile_factor);
+                    }
+                    else {
+                        tmp_x = tmp_y = std::stoi(sd_tile_size_str);
+                    }
+                }
+                tile_size_x = std::max(std::min(tmp_x, latent_x), min_tile_dimension);
+                tile_size_y = std::max(std::min(tmp_y, latent_y), min_tile_dimension);
+            } catch (const std::invalid_argument&) {
+                LOG_WARN("SD_TILE_SIZE is invalid, keeping the default");
+            } catch (const std::out_of_range&) {
+                LOG_WARN("SD_TILE_SIZE is out of range, keeping the default");
+            }
+        }
+
+        if(!decode){
+            // TODO: also use and arg for this one?
+            // to keep the compute buffer size consistent
+            tile_size_x*=1.30539;
+            tile_size_y*=1.30539;
+        }
         if (!use_tiny_autoencoder) {
             if (decode) {
                 ggml_tensor_scale(x, 1.0f / scale_factor);
             } else {
                 ggml_tensor_scale_input(x);
             }
-            if (vae_tiling && decode) {  // TODO: support tiling vae encode
+            if (vae_tiling) {
+                if (SD_TILE_SIZE != nullptr) {
+                    LOG_INFO("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
+                }
+                if (SD_TILE_OVERLAP != nullptr) {
+                    LOG_INFO("VAE Tile overlap: %.2f", tile_overlap);
+                }
                 // split latent in 32x32 tiles and compute in several steps
                 auto on_tiling = [&](ggml_tensor* in, ggml_tensor* out, bool init) {
                     first_stage_model->compute(n_threads, in, decode, &out);
                 };
-                sd_tiling(x, result, 8, 32, 0.5f, on_tiling);
+                sd_tiling_non_square(x, result, 8, tile_size_x, tile_size_y, tile_overlap, on_tiling);
             } else {
                 first_stage_model->compute(n_threads, x, decode, &result);
             }
@@ -1182,7 +1356,7 @@ public:
                 ggml_tensor_scale_output(result);
             }
         } else {
-            if (vae_tiling && decode) {  // TODO: support tiling vae encode
+            if (vae_tiling) {
                 // split latent in 64x64 tiles and compute in several steps
                 auto on_tiling = [&](ggml_tensor* in, ggml_tensor* out, bool init) {
                     tae_first_stage->compute(n_threads, in, decode, &out);
@@ -1311,7 +1485,7 @@ void sd_ctx_params_init(sd_ctx_params_t* sd_ctx_params) {
     sd_ctx_params->vae_decode_only         = true;
     sd_ctx_params->vae_tiling              = false;
     sd_ctx_params->free_params_immediately = true;
-    sd_ctx_params->n_threads               = get_num_physical_cores();
+    sd_ctx_params->n_threads               = sd_get_num_physical_cores();
     sd_ctx_params->wtype                   = SD_TYPE_COUNT;
     sd_ctx_params->rng_type                = CUDA_RNG;
     sd_ctx_params->schedule                = DEFAULT;
@@ -1545,7 +1719,8 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
                                     std::string input_id_images_path,
                                     std::vector<ggml_tensor*> ref_latents,
                                     ggml_tensor* concat_latent = NULL,
-                                    ggml_tensor* denoise_mask  = NULL) {
+                                    ggml_tensor* denoise_mask  = NULL,
+                                    const kcpp_img_gen_params_t* kcpp_img_gen_params = NULL) {
     if (seed < 0) {
         // Generally, when using the provided command line, the seed is always >0.
         // However, to prevent potential issues if 'stable-diffusion.cpp' is invoked as a library
@@ -1572,6 +1747,12 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
     prompt = result_pair.second;
     LOG_DEBUG("prompt after extract and remove lora: \"%s\"", prompt.c_str());
 
+    //only use hardcoded lora for kcpp
+    if (!lora_f2m.empty()) {
+        lora_f2m.clear();
+        printf("\nWarning: not applying LoRAs requested by prompt!\n");
+    }
+
     int64_t t0 = ggml_time_ms();
     sd_ctx->sd->apply_loras(lora_f2m);
     int64_t t1 = ggml_time_ms();
@@ -1582,6 +1763,10 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
     ggml_tensor* init_img = NULL;
     SDCondition id_cond;
     std::vector<bool> class_tokens_mask;
+    if (sd_ctx->sd->pmid_lora && kcpp_img_gen_params && kcpp_img_gen_params->photomaker_reference_count>0)
+    {
+        sd_ctx->sd->stacked_id = true; //turn on photomaker if needed
+    }
     if (sd_ctx->sd->stacked_id) {
         if (!sd_ctx->sd->pmid_lora->applied) {
             t0 = ggml_time_ms();
@@ -1624,6 +1809,33 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
                 input_id_images.push_back(input_image);
             }
         }
+
+        // handle multiple photomaker image passed in by kcpp
+        if (sd_ctx->sd->pmid_lora && kcpp_img_gen_params)
+        {
+            for(int i=0;i<kcpp_img_gen_params->photomaker_reference_count;++i)
+            {
+                int c = 0;
+                int width, height;
+                width = kcpp_img_gen_params->photomaker_references[i].width;
+                height = kcpp_img_gen_params->photomaker_references[i].height;
+                c = kcpp_img_gen_params->photomaker_references[i].channel;
+                uint8_t* input_image_buffer = kcpp_img_gen_params->photomaker_references[i].data;
+                sd_image_t* input_image = NULL;
+                input_image  = new sd_image_t{(uint32_t)width,
+                                                (uint32_t)height,
+                                                3,
+                                                input_image_buffer};
+                input_image   = preprocess_id_image(input_image);
+                if (input_image == NULL) {
+                    LOG_ERROR("\npreprocess input id image from kcpp photomaker failed\n");
+                } else {
+                    LOG_INFO("\nPhotoMaker loaded image from kcpp\n");
+                    input_id_images.push_back(input_image);
+                }
+            }
+        }
+
         if (input_id_images.size() > 0) {
             sd_ctx->sd->pmid_model->style_strength = style_ratio;
             int32_t w                              = input_id_images[0]->width;
@@ -1888,7 +2100,7 @@ ggml_tensor* generate_init_latent(sd_ctx_t* sd_ctx,
     return init_latent;
 }
 
-sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* sd_img_gen_params) {
+sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* sd_img_gen_params, const kcpp_img_gen_params_t* kcpp_img_gen_params) {
     int width  = sd_img_gen_params->width;
     int height = sd_img_gen_params->height;
     if (sd_version_is_dit(sd_ctx->sd->version)) {
@@ -1906,15 +2118,15 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* sd_img_g
     }
 
     struct ggml_init_params params;
-    params.mem_size = static_cast<size_t>(10 * 1024 * 1024);  // 10 MB
+    params.mem_size = static_cast<size_t>(20 * 1024 * 1024);  // 20 MB increased by kcpp
     if (sd_version_is_sd3(sd_ctx->sd->version)) {
-        params.mem_size *= 3;
+        params.mem_size *= 2; //readjust by kcpp as above changed
     }
     if (sd_version_is_flux(sd_ctx->sd->version)) {
-        params.mem_size *= 4;
+        params.mem_size *= 3; //readjust by kcpp as above changed
     }
     if (sd_ctx->sd->stacked_id) {
-        params.mem_size += static_cast<size_t>(10 * 1024 * 1024);  // 10 MB
+        params.mem_size += static_cast<size_t>(15 * 1024 * 1024);  // 15 MB increased by kcpp
     }
     params.mem_size += width * height * 3 * sizeof(float) * 3;
     params.mem_size += width * height * 3 * sizeof(float) * 3 * sd_img_gen_params->ref_images_count;
@@ -2097,7 +2309,8 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* sd_img_g
                                                         sd_img_gen_params->input_id_images_path,
                                                         ref_latents,
                                                         concat_latent,
-                                                        denoise_mask);
+                                                        denoise_mask,
+                                                        kcpp_img_gen_params);
 
     size_t t2 = ggml_time_ms();
 

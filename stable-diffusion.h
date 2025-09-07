@@ -101,7 +101,7 @@ enum sd_type_t {
     // SD_TYPE_IQ4_NL_4_4 = 36,
     // SD_TYPE_IQ4_NL_4_8 = 37,
     // SD_TYPE_IQ4_NL_8_8 = 38,
-    SD_TYPE_COUNT = 39,
+    SD_TYPE_COUNT   = 40,
 };
 
 enum sd_log_level_t {
@@ -189,6 +189,11 @@ typedef struct {
 } sd_img_gen_params_t;
 
 typedef struct {
+    sd_image_t* photomaker_references;
+    int photomaker_reference_count;
+} kcpp_img_gen_params_t;
+
+typedef struct {
     sd_image_t init_image;
     int width;
     int height;
@@ -210,7 +215,7 @@ typedef void (*sd_progress_cb_t)(int step, int steps, float time, void* data);
 
 SD_API void sd_set_log_callback(sd_log_cb_t sd_log_cb, void* data);
 SD_API void sd_set_progress_callback(sd_progress_cb_t cb, void* data);
-SD_API int32_t get_num_physical_cores();
+SD_API int32_t sd_get_num_physical_cores();
 SD_API const char* sd_get_system_info();
 
 SD_API const char* sd_type_name(enum sd_type_t type);
@@ -230,7 +235,7 @@ SD_API void free_sd_ctx(sd_ctx_t* sd_ctx);
 
 SD_API void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params);
 SD_API char* sd_img_gen_params_to_str(const sd_img_gen_params_t* sd_img_gen_params);
-SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* sd_img_gen_params);
+SD_API sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* sd_img_gen_params, const kcpp_img_gen_params_t* kcpp_img_gen_params);
 
 SD_API void sd_vid_gen_params_init(sd_vid_gen_params_t* sd_vid_gen_params);
 SD_API sd_image_t* generate_video(sd_ctx_t* sd_ctx, const sd_vid_gen_params_t* sd_vid_gen_params);  // broken

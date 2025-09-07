@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <filesystem>
 
 #include "model.h"
 #include "stable-diffusion.h"
@@ -31,6 +32,19 @@
 #endif
 
 #define ST_HEADER_SIZE_LEN 8
+
+static std::string format(const char* fmt, ...) {
+    va_list ap;
+    va_list ap2;
+    va_start(ap, fmt);
+    va_copy(ap2, ap);
+    int size = vsnprintf(NULL, 0, fmt, ap);
+    std::vector<char> buf(size + 1);
+    int size2 = vsnprintf(buf.data(), size + 1, fmt, ap2);
+    va_end(ap2);
+    va_end(ap);
+    return std::string(buf.data(), size);
+}
 
 uint64_t read_u64(uint8_t* buffer) {
     // little endian
@@ -940,7 +954,12 @@ bool is_zip_file(const std::string& file_path) {
 }
 
 bool is_gguf_file(const std::string& file_path) {
-    std::ifstream file(file_path, std::ios::binary);
+    #ifdef _WIN32
+        std::filesystem::path fpath = std::filesystem::u8path(file_path);
+    #else
+        std::filesystem::path fpath = std::filesystem::path(file_path);
+    #endif
+    std::ifstream file(fpath, std::ios::binary);
     if (!file.is_open()) {
         return false;
     }
@@ -961,7 +980,12 @@ bool is_gguf_file(const std::string& file_path) {
 }
 
 bool is_safetensors_file(const std::string& file_path) {
-    std::ifstream file(file_path, std::ios::binary);
+    #ifdef _WIN32
+        std::filesystem::path fpath = std::filesystem::u8path(file_path);
+    #else
+        std::filesystem::path fpath = std::filesystem::path(file_path);
+    #endif
+    std::ifstream file(fpath, std::ios::binary);
     if (!file.is_open()) {
         return false;
     }
@@ -1012,9 +1036,10 @@ bool ModelLoader::init_from_file(const std::string& file_path, const std::string
     } else if (is_safetensors_file(file_path)) {
         LOG_INFO("load %s using safetensors format", file_path.c_str());
         return init_from_safetensors_file(file_path, prefix);
-    } else if (is_zip_file(file_path)) {
-        LOG_INFO("load %s using checkpoint format", file_path.c_str());
-        return init_from_ckpt_file(file_path, prefix);
+    //disable ckpt loading
+    // } else if (is_zip_file(file_path)) {
+    //     LOG_INFO("load %s using checkpoint format", file_path.c_str());
+    //     return init_from_ckpt_file(file_path, prefix);
     } else {
         LOG_WARN("unknown format %s", file_path.c_str());
         return false;
@@ -1088,7 +1113,12 @@ bool ModelLoader::init_from_safetensors_file(const std::string& file_path, const
     LOG_DEBUG("init from '%s'", file_path.c_str());
     file_paths_.push_back(file_path);
     size_t file_index = file_paths_.size() - 1;
-    std::ifstream file(file_path, std::ios::binary);
+    #ifdef _WIN32
+        std::filesystem::path fpath = std::filesystem::u8path(file_path);
+    #else
+        std::filesystem::path fpath = std::filesystem::path(file_path);
+    #endif
+    std::ifstream file(fpath, std::ios::binary);
     if (!file.is_open()) {
         LOG_ERROR("failed to open '%s'", file_path.c_str());
         file_paths_.pop_back();
@@ -1634,6 +1664,16 @@ bool ModelLoader::model_is_unet() {
     return false;
 }
 
+bool ModelLoader::has_diffusion_model_tensors()
+{
+    for (auto& tensor_storage : tensor_storages) {
+        if (tensor_storage.name.find("model.diffusion_model.") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 SDVersion ModelLoader::get_sd_version() {
     TensorStorage token_embedding_weight, input_block_weight;
     bool input_block_checked = false;
@@ -1888,9 +1928,14 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, ggml_backend
     bool success = true;
     for (size_t file_index = 0; file_index < file_paths_.size(); file_index++) {
         std::string file_path = file_paths_[file_index];
-        LOG_DEBUG("loading tensors from %s", file_path.c_str());
+        LOG_DEBUG("loading tensors from %s\n", file_path.c_str());
 
-        std::ifstream file(file_path, std::ios::binary);
+        #ifdef _WIN32
+            std::filesystem::path fpath = std::filesystem::u8path(file_path);
+        #else
+            std::filesystem::path fpath = std::filesystem::path(file_path);
+        #endif
+        std::ifstream file(fpath, std::ios::binary);
         if (!file.is_open()) {
             LOG_ERROR("failed to open '%s'", file_path.c_str());
             return false;
@@ -2048,7 +2093,12 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, ggml_backend
             }
             size_t tensor_max = processed_tensor_storages.size();
             int64_t t2        = ggml_time_ms();
-            pretty_progress(++tensor_count, tensor_max, (t2 - t1) / 1000.0f);
+            // kcpp throttle progress printing
+            ++tensor_count;
+            if(tensor_count<2 || tensor_count%5==0 || (tensor_count+10) > tensor_max)
+            {
+                pretty_progress(tensor_count, tensor_max, (t2 - t1) / 1000.0f);
+            }
             t1      = t2;
             partial = tensor_count != tensor_max;
         }
