@@ -62,6 +62,17 @@ void replace_all_chars(std::string& str, char target, char replacement) {
     }
 }
 
+int round_up_to(int value, int base) {
+    if (base <= 0) {
+        return value;
+    }
+    if (value % base == 0) {
+        return value;
+    } else {
+        return ((value / base) + 1) * base;
+    }
+}
+
 #ifdef _WIN32  // code for windows
 #include <windows.h>
 
@@ -280,7 +291,7 @@ std::string path_join(const std::string& p1, const std::string& p2) {
     return p1 + "/" + p2;
 }
 
-std::vector<std::string> splitString(const std::string& str, char delimiter) {
+std::vector<std::string> split_string(const std::string& str, char delimiter) {
     std::vector<std::string> result;
     size_t start = 0;
     size_t end   = str.find(delimiter);
