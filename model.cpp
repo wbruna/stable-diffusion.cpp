@@ -4,6 +4,7 @@
 #include <fstream>
 #include <functional>
 #include <mutex>
+#include <condition_variable>
 #include <regex>
 #include <set>
 #include <string>
@@ -2036,6 +2037,8 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
     size_t total_tensors_processed        = 0;
     const size_t total_tensors_to_process = processed_tensor_storages.size();
     const int64_t t_start                 = ggml_time_ms();
+    std::mutex mtx;
+    std::condition_variable cv;
 
     for (size_t file_index = 0; file_index < file_paths_.size(); file_index++) {
         std::string file_path = file_paths_[file_index];
@@ -2065,27 +2068,43 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
             n_threads = 1;
         }
 
-        std::atomic<size_t> tensor_idx(0);
-        std::atomic<bool> failed(false);
+        std::ifstream single_file;
+        bool is_single_file(false);
+
+        struct zip_t* zip = NULL;
+        if (is_zip) {
+            zip = zip_open(file_path.c_str(), 0, 'r');
+            if (zip == NULL) {
+                LOG_ERROR("failed to open zip '%s'", file_path.c_str());
+                success = false;
+                break;
+            }
+        } else {
+            const char * load_single_file = getenv("SD_LOAD_MODEL_SINGLEFILE");
+            if (load_single_file && *load_single_file == '1') {
+                single_file.open(file_path, std::ios::binary);
+                if (!single_file.is_open()) {
+                    LOG_ERROR("failed to open '%s'", file_path.c_str());
+                    success = false;
+                    break;
+                }
+            }
+        }
+
+        size_t tensor_idx(0);
+        bool loading_failed(false);
         std::vector<std::thread> workers;
 
         for (int i = 0; i < n_threads; ++i) {
             workers.emplace_back([&, file_path, is_zip]() {
                 std::ifstream file;
-                struct zip_t* zip = NULL;
-                if (is_zip) {
-                    zip = zip_open(file_path.c_str(), 0, 'r');
-                    if (zip == NULL) {
-                        LOG_ERROR("failed to open zip '%s'", file_path.c_str());
-                        failed = true;
-                        return;
-                    }
-                } else {
+                bool failed(false);
+
+                if (!is_zip && !is_single_file) {
                     file.open(file_path, std::ios::binary);
                     if (!file.is_open()) {
                         LOG_ERROR("failed to open '%s'", file_path.c_str());
                         failed = true;
-                        return;
                     }
                 }
 
@@ -2093,9 +2112,16 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
                 std::vector<uint8_t> convert_buffer;
 
                 while (true) {
-                    size_t idx = tensor_idx.fetch_add(1);
-                    if (idx >= file_tensors.size() || failed) {
-                        break;
+                    size_t idx;
+
+                    {
+                        std::lock_guard<std::mutex> lock(mtx);
+                        idx = tensor_idx++;
+                        loading_failed = loading_failed || failed;
+                        if (idx >= file_tensors.size() || loading_failed) {
+                            cv.notify_one();
+                            break;
+                        }
                     }
 
                     const TensorStorage& tensor_storage = *file_tensors[idx];
@@ -2104,7 +2130,7 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
                     if (!on_new_tensor_cb(tensor_storage, &dst_tensor)) {
                         LOG_WARN("process tensor failed: '%s'", tensor_storage.name.c_str());
                         failed = true;
-                        break;
+                        continue;
                     }
 
                     if (dst_tensor == NULL) {
@@ -2115,6 +2141,7 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
 
                     auto read_data = [&](char* buf, size_t n) {
                         if (zip != NULL) {
+                            std::lock_guard<std::mutex> lock(mtx);
                             zip_entry_openbyindex(zip, tensor_storage.index_in_zip);
                             size_t entry_size = zip_entry_size(zip);
                             if (entry_size != n) {
@@ -2134,6 +2161,17 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
                                 read_time_ms += curr_time_ms - prev_time_ms;
                             }
                             zip_entry_close(zip);
+                        } else if (is_single_file) {
+                            std::lock_guard<std::mutex> lock(mtx);
+                            prev_time_ms = ggml_time_ms();
+                            single_file.seekg(tensor_storage.offset);
+                            single_file.read(buf, n);
+                            curr_time_ms = ggml_time_ms();
+                            read_time_ms += curr_time_ms - prev_time_ms;
+                            if (!single_file) {
+                                LOG_ERROR("read tensor data failed: '%s'", file_path.c_str());
+                                failed = true;
+                            }
                         } else {
                             prev_time_ms = ggml_time_ms();
                             file.seekg(tensor_storage.offset);
@@ -2245,27 +2283,32 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
                             copy_to_backend_time_ms += curr_time_ms - prev_time_ms;
                         }
                     }
+
                 }
-                if (zip != NULL) {
-                    zip_close(zip);
-                }
+
             });
         }
 
-        while (true) {
-            size_t current_idx = tensor_idx.load();
-            if (current_idx >= file_tensors.size() || failed) {
-                break;
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            while (true) {
+                if (tensor_idx >= file_tensors.size() || loading_failed) {
+                    break;
+                }
+                pretty_progress(total_tensors_processed + tensor_idx, total_tensors_to_process, (ggml_time_ms() - t_start) / 1000.0f);
+                cv.wait_for(lock, std::chrono::milliseconds(200));
             }
-            pretty_progress(total_tensors_processed + current_idx, total_tensors_to_process, (ggml_time_ms() - t_start) / 1000.0f);
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
 
         for (auto& w : workers) {
             w.join();
         }
 
-        if (failed) {
+        if (zip != NULL) {
+            zip_close(zip);
+        }
+
+        if (loading_failed) {
             success = false;
             break;
         }
