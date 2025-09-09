@@ -843,6 +843,33 @@ public:
         return result < -1;
     }
 
+    void apply_lora_from_file(const std::string& lora_path, float multiplier) {
+        int64_t t0                 = ggml_time_ms();
+        std::string st_file_path   = lora_path;
+        std::string file_path;
+        if (file_exists(st_file_path)) {
+            file_path = st_file_path;
+        } else {
+            LOG_WARN("can not find %s for lora %s", st_file_path.c_str(), lora_path.c_str());
+            return;
+        }
+        LoraModel lora(backend, file_path);
+        if (!lora.load_from_file()) {
+            LOG_WARN("load lora tensors from %s failed", file_path.c_str());
+            return;
+        }
+
+        lora.multiplier = multiplier;
+        lora.apply(tensors, version, n_threads);
+        lora.free_params_buffer();
+
+        int64_t t1 = ggml_time_ms();
+
+        LOG_INFO("lora '%s' applied, taking %.2fs",
+                 lora_path.c_str(),
+                 (t1 - t0) * 1.0f / 1000);
+    }
+
     void apply_lora(std::string lora_name, float multiplier) {
         int64_t t0                 = ggml_time_ms();
         std::string high_noise_tag = "|high_noise|";
