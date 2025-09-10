@@ -3,7 +3,6 @@
 
 #include "ggml_extend.hpp"
 #include "gits_noise.inl"
-#include <boost/math/distributions/beta.hpp>
 
 /*================================================= CompVisDenoiser ==================================================*/
 
@@ -252,6 +251,124 @@ struct KarrasSchedule : SigmaSchedule {
     }
 };
 
+#if 0 // boost version
+
+#include <boost/math/distributions/beta.hpp>
+
+struct BetaDist {
+    boost::math::beta_distribution<double> dist;
+
+    BetaDist(double a = 0.6f, double b = 0.6f)
+    : dist(a, b) {}
+
+    double quantile(double u) {
+        return boost::math::quantile(dist, u);
+    }
+};
+
+#else // local version
+
+struct BetaDist {
+
+    BetaDist(double a=0.6f, double b=0.6f)
+    : alpha(a), beta(b) {}
+
+    // Beta quantile function using Newton-Raphson method
+    double quantile(double u) {
+        if (u <= 0.0) return 0.0;
+        if (u >= 1.0) return 1.0;
+
+        double x = u < 0.5 ? u * u : 1.0 - (1.0 - u) * (1.0 - u);
+
+        const int max_iterations = 50;
+        const double tolerance = 1e-12;
+
+        for (int i = 0; i < max_iterations; ++i) {
+            double err = beta_cdf(x) - u;
+            if (std::abs(err) < tolerance) {
+                break;
+            }
+
+            double derivative = beta_pdf(x);
+            if (std::abs(derivative) < 1e-30) {
+                break;
+            }
+
+            double new_x = x - err / derivative;
+            x = std::max(0.0, std::min(1.0, new_x));
+        }
+
+        return x;
+    }
+
+private:
+    double alpha;
+    double beta;
+
+    double lbeta_ab() {
+        return std::lgamma(alpha) + std::lgamma(beta) - std::lgamma(alpha + beta);
+    }
+
+    // Beta probability density function
+    double beta_pdf(double x) {
+        if (x <= 0.0 || x >= 1.0)
+            return 0.0;
+        return std::exp(-lbeta_ab()) * std::pow(x, alpha - 1.0) * std::pow(1.0 - x, beta - 1.0);
+    }
+
+    // Beta cumulative distribution function
+    double beta_cdf(double x) {
+        if (x <= 0.0) return 0.0;
+        if (x >= 1.0) return 1.0;
+        if (x > (alpha + 1.0) / (alpha + beta + 2.0)) {
+            // use symmetry relation
+            return 1.0 - incomplete_beta(beta, alpha, 1.0 - x);
+        }
+        else {
+            return incomplete_beta(alpha, beta, x);
+        }
+    }
+
+    // Incomplete beta function using continued fraction representation
+    double incomplete_beta(double a, double b, double x) {
+
+        double f = 1.0, c = 1.0, d = 0.0;
+        const int max_iterations = 200;
+        const double tolerance = 1e-15;
+
+        for (int i = 0; i <= max_iterations; ++i) {
+            int m = i / 2;
+            double numerator;
+
+            if (i == 0) {
+                numerator = 1.0;
+            } else if (i % 2 == 0) {
+                numerator = (m * (b - m) * x) / ((a + 2.0 * m - 1.0) * (a + 2.0 * m));
+            } else {
+                numerator = -((a + m) * (a + b + m) * x) / ((a + 2.0 * m) * (a + 2.0 * m + 1.0));
+            }
+
+            d = 1.0 + numerator * d;
+            if (std::abs(d) < 1e-30) d = 1e-30;
+            d = 1.0 / d;
+
+            c = 1.0 + numerator / c;
+            if (std::abs(c) < 1e-30) c = 1e-30;
+
+            double cd = c * d;
+            f *= cd;
+
+            if (std::abs(cd - 1.0) < tolerance) {
+                break;
+            }
+        }
+
+        return (std::exp(a * std::log(x) + b * std::log(1.0 - x) - lbeta_ab()) / a) * (f - 1.0);
+    }
+};
+
+#endif
+
 struct BetaSchedule : SigmaSchedule {
     float alpha = 0.6f;
     float beta  = 0.6f;
@@ -272,7 +389,7 @@ struct BetaSchedule : SigmaSchedule {
         }
 
         // Beta-Verteilung (wie scipy.stats.beta.ppf)
-        boost::math::beta_distribution<double> dist(alpha, beta);
+        BetaDist beta_distribution;
 
         int last_t = -1;
         for (uint32_t i = 0; i < n; i++) {
@@ -280,7 +397,7 @@ struct BetaSchedule : SigmaSchedule {
             double u = 1.0 - static_cast<double>(i) / static_cast<double>(n);
 
             // ppf(ts) * total_timesteps
-            double t_cont = quantile(dist, u) * t_max;
+            double t_cont = beta_distribution.quantile(u) * t_max;
             int t = (int)std::lround(t_cont);
 
             if (t != last_t) {
