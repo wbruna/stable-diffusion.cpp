@@ -3,6 +3,7 @@
 
 #include "ggml_extend.hpp"
 #include "gits_noise.inl"
+#include <boost/math/distributions/beta.hpp>
 
 /*================================================= CompVisDenoiser ==================================================*/
 
@@ -247,6 +248,48 @@ struct KarrasSchedule : SigmaSchedule {
             result[i] = pow(max_inv_rho + (float)i / ((float)n - 1.f) * (min_inv_rho - max_inv_rho), rho);
         }
         result[n] = 0.;
+        return result;
+    }
+};
+
+struct BetaSchedule : SigmaSchedule {
+    float alpha = 0.6f;
+    float beta  = 0.6f;
+
+    BetaSchedule(float a = 0.6f, float b = 0.6f) : alpha(a), beta(b) {}
+
+    std::vector<float> get_sigmas(uint32_t n, float sigma_min, float sigma_max, t_to_sigma_t t_to_sigma) override {
+        std::vector<float> result;
+        result.reserve(n + 1);
+
+        int t_max = TIMESTEPS - 1;
+        if (n == 0) {
+            return result;
+        } else if (n == 1) {
+            result.push_back(t_to_sigma((float)t_max));
+            result.push_back(0);
+            return result;
+        }
+
+        // Beta-Verteilung (wie scipy.stats.beta.ppf)
+        boost::math::beta_distribution<double> dist(alpha, beta);
+
+        int last_t = -1;
+        for (uint32_t i = 0; i < n; i++) {
+            // entspricht ts = 1 - linspace(0,1,n,endpoint=False)
+            double u = 1.0 - static_cast<double>(i) / static_cast<double>(n);
+
+            // ppf(ts) * total_timesteps
+            double t_cont = quantile(dist, u) * t_max;
+            int t = (int)std::lround(t_cont);
+
+            if (t != last_t) {
+                result.push_back(t_to_sigma((float)t));
+                last_t = t;
+            }
+        }
+
+        result.push_back(0.0f);
         return result;
     }
 };
