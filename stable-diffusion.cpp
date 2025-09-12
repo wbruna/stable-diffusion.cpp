@@ -108,7 +108,7 @@ public:
 
     std::string taesd_path;
     bool use_tiny_autoencoder            = false;
-    sd_tiling_params_t vae_tiling_params = {false, 32, 32, 0.5f, false, 0, 0};
+    sd_tiling_params_t vae_tiling_params = {false, 0, 0, 0.5f, false, 0, 0};
     bool offload_params_to_cpu           = false;
     bool stacked_id                      = false;
 
@@ -1339,8 +1339,12 @@ public:
         // TODO: args instead of env for tile size / overlap?
         if (!use_tiny_autoencoder) {
             float tile_overlap = vae_tiling_params.target_overlap;
-            int tile_size_x    = vae_tiling_params.tile_size_x;
-            int tile_size_y    = vae_tiling_params.tile_size_y;
+            int tile_size_x    = (vae_tiling_params.tile_size_x >= 4)
+                                 ? vae_tiling_params.tile_size_x
+                                 : 32;
+            int tile_size_y    = (vae_tiling_params.tile_size_y >= 4)
+                                 ? vae_tiling_params.tile_size_y
+                                 : 32;
 
             if (vae_tiling_params.relative) {
                 get_relative_tile_sizes(tile_size_x, tile_size_y, tile_overlap, vae_tiling_params.rel_size_x, vae_tiling_params.rel_size_y, W, H);
@@ -1490,8 +1494,12 @@ public:
         int64_t t0 = ggml_time_ms();
         if (!use_tiny_autoencoder) {
             float tile_overlap = vae_tiling_params.target_overlap;
-            int tile_size_x    = vae_tiling_params.tile_size_x;
-            int tile_size_y    = vae_tiling_params.tile_size_y;
+            int tile_size_x    = (vae_tiling_params.tile_size_x >= 4)
+                                 ? vae_tiling_params.tile_size_x
+                                 : 32;
+            int tile_size_y    = (vae_tiling_params.tile_size_y >= 4)
+                                 ? vae_tiling_params.tile_size_y
+                                 : 32;
 
             if (vae_tiling_params.relative) {
                 get_relative_tile_sizes(tile_size_x, tile_size_y, tile_overlap, vae_tiling_params.rel_size_x, vae_tiling_params.rel_size_y, x->ne[0], x->ne[1]);
@@ -1769,7 +1777,7 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
     sd_img_gen_params->control_strength  = 0.9f;
     sd_img_gen_params->style_strength    = 20.f;
     sd_img_gen_params->normalize_input   = false;
-    sd_img_gen_params->vae_tiling_params = {false, 32, 32, 0.5f, false, 0.0f, 0.0f};
+    sd_img_gen_params->vae_tiling_params = {false, 0, 0, 0.5f, false, 0.0f, 0.0f};
 }
 
 char* sd_img_gen_params_to_str(const sd_img_gen_params_t* sd_img_gen_params) {
