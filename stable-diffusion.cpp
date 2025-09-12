@@ -108,7 +108,7 @@ public:
 
     std::string taesd_path;
     bool use_tiny_autoencoder            = false;
-    sd_tiling_params_t vae_tiling_params = {false, 0, 0, 0.5f, false, 0, 0};
+    sd_tiling_params_t vae_tiling_params = {false, 0, 0, 0.5f, 0, 0};
     bool offload_params_to_cpu           = false;
     bool stacked_id                      = false;
 
@@ -1309,7 +1309,7 @@ public:
             int tile_size = default_tile_size;
             // rel_size <= 1 means simple fraction of the latent dimension
             // rel_size > 1 means number of tiles across that dimension
-            if (params.relative) {
+            if (factor > 0.f) {
                 if (factor > 1.0)
                     factor = 1 / (factor - factor * tile_overlap + tile_overlap);
                 tile_size = std::round(latent_size * factor);
@@ -1322,8 +1322,6 @@ public:
 
         tile_size_x = get_tile_size(params.tile_size_x, params.rel_size_x, latent_x);
         tile_size_y = get_tile_size(params.tile_size_y, params.rel_size_y, latent_y);
-
-        LOG_INFO("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
     }
 
     ggml_tensor* encode_first_stage(ggml_context* work_ctx, ggml_tensor* x, bool decode_video = false) {
@@ -1349,6 +1347,8 @@ public:
             // multiply tile size for encode to keep the compute buffer size consistent
             tile_size_x *= 1.30539;
             tile_size_y *= 1.30539;
+
+            LOG_DEBUG("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
 
             process_vae_input_tensor(x);
             if (vae_tiling_params.enabled && !decode_video) {
@@ -1765,7 +1765,7 @@ void sd_img_gen_params_init(sd_img_gen_params_t* sd_img_gen_params) {
     sd_img_gen_params->control_strength  = 0.9f;
     sd_img_gen_params->style_strength    = 20.f;
     sd_img_gen_params->normalize_input   = false;
-    sd_img_gen_params->vae_tiling_params = {false, 0, 0, 0.5f, false, 0.0f, 0.0f};
+    sd_img_gen_params->vae_tiling_params = {false, 0, 0, 0.5f, 0.0f, 0.0f};
 }
 
 char* sd_img_gen_params_to_str(const sd_img_gen_params_t* sd_img_gen_params) {
