@@ -1301,7 +1301,8 @@ public:
     }
 
 
-    void get_tile_sizes(int& tile_size_x, int& tile_size_y, float& tile_overlap, const sd_tiling_params_t & params, int latent_x, int latent_y) {
+    void get_tile_sizes(int& tile_size_x, int& tile_size_y, float& tile_overlap, const sd_tiling_params_t & params,
+        int latent_x, int latent_y, float encoding_factor = 1.0f) {
         tile_overlap = std::max(std::min(params.target_overlap, 0.5f), 0.0f);
         auto get_tile_size = [&](int requested_size, float factor, int latent_size) {
             const int default_tile_size = 32;
@@ -1317,6 +1318,7 @@ public:
             else if (requested_size >= min_tile_dimension) {
                 tile_size = requested_size;
             }
+            tile_size *= encoding_factor;
             return std::max(std::min(tile_size, latent_size), min_tile_dimension);
         };
 
@@ -1341,12 +1343,8 @@ public:
         if (!use_tiny_autoencoder) {
             float tile_overlap;
             int tile_size_x, tile_size_y;
-            get_tile_sizes(tile_size_x, tile_size_y, tile_overlap, vae_tiling_params, W, H);
-
-            // TODO: also use an arg for this one?
             // multiply tile size for encode to keep the compute buffer size consistent
-            tile_size_x *= 1.30539;
-            tile_size_y *= 1.30539;
+            get_tile_sizes(tile_size_x, tile_size_y, tile_overlap, vae_tiling_params, W, H, 1.30539);
 
             LOG_DEBUG("VAE Tile size: %dx%d", tile_size_x, tile_size_y);
 
