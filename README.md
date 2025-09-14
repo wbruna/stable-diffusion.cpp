@@ -60,14 +60,6 @@ API and command-line option may change frequently.***
     - Windows
     - Android (via Termux, [Local Diffusion](https://github.com/rmatif/Local-Diffusion))
 
-### TODO
-
-- [ ] More sampling methods
-- [ ] Make inference faster
-    - The current implementation of ggml_conv_2d is slow and has high memory usage
-- [ ] Continuing to reduce memory usage (quantizing the weights of ggml_conv_2d)
-- [ ] Implement Inpainting support
-
 ## Usage
 
 For most users, you can download the built executable program from the latest [release](https://github.com/leejet/stable-diffusion.cpp/releases/latest).
@@ -137,7 +129,9 @@ This provides BLAS acceleration using the ROCm cores of your AMD GPU. Make sure 
 Windows User Refer to [docs/hipBLAS_on_Windows.md](docs%2FhipBLAS_on_Windows.md) for a comprehensive guide.
 
 ```
-cmake .. -G "Ninja" -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DSD_HIPBLAS=ON -DCMAKE_BUILD_TYPE=Release -DAMDGPU_TARGETS=gfx1100 -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+export GFX_NAME=$(rocminfo | grep -m 1 -E "gfx[^0]{1}" | sed -e 's/ *Name: *//' | awk '{$1=$1; print}' || echo "rocminfo missing")
+echo $GFX_NAME
+cmake .. -G "Ninja" -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DSD_HIPBLAS=ON -DCMAKE_BUILD_TYPE=Release -DGPU_TARGETS=$GFX_NAME -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
 cmake --build . --config Release
 ```
 
@@ -319,6 +313,9 @@ arguments:
   -i, --end-img [IMAGE]              path to the end image, required by flf2v
   --control-image [IMAGE]            path to image condition, control net
   -r, --ref-image [PATH]             reference image for Flux Kontext models (can be used multiple times)
+  --control-video [PATH]             path to control video frames, It must be a directory path.
+                                     The video frames inside should be stored as images in lexicographical (character) order
+                                     For example, if the control video path is `frames`, the directory contain images such as 00.png, 01.png, 鈥?etc.
   --increase-ref-index               automatically increase the indices of references images based on the order they are listed (starting with 1).
   -o, --output OUTPUT                path to write result image to (default: ./output.png)
   -p, --prompt [PROMPT]              the prompt to render
@@ -332,9 +329,9 @@ arguments:
   --skip-layers LAYERS               Layers to skip for SLG steps: (default: [7,8,9])
   --skip-layer-start START           SLG enabling point: (default: 0.01)
   --skip-layer-end END               SLG disabling point: (default: 0.2)
-  --scheduler {discrete, karras, exponential, ays, gits} Denoiser sigma scheduler (default: discrete)
+  --scheduler {discrete, karras, exponential, ays, gits, smoothstep} Denoiser sigma scheduler (default: discrete)
   --sampling-method {euler, euler_a, heun, dpm2, dpm++2s_a, dpm++2m, dpm++2mv2, ipndm, ipndm_v, lcm, ddim_trailing, tcd}
-                                     sampling method (default: "euler_a")
+                                     sampling method (default: "euler" for Flux/SD3/Wan, "euler_a" otherwise)
   --steps  STEPS                     number of sample steps (default: 20)
   --high-noise-cfg-scale SCALE       (high noise) unconditional guidance scale: (default: 7.0)
   --high-noise-img-cfg-scale SCALE   (high noise) image guidance scale for inpaint or instruct-pix2pix models: (default: same as --cfg-scale)
@@ -345,7 +342,7 @@ arguments:
   --high-noise-skip-layers LAYERS    (high noise) Layers to skip for SLG steps: (default: [7,8,9])
   --high-noise-skip-layer-start      (high noise) SLG enabling point: (default: 0.01)
   --high-noise-skip-layer-end END    (high noise) SLG disabling point: (default: 0.2)
-  --high-noise-scheduler {discrete, karras, exponential, ays, gits} Denoiser sigma scheduler (default: discrete)
+  --high-noise-scheduler {discrete, karras, exponential, ays, gits, smoothstep} Denoiser sigma scheduler (default: discrete)
   --high-noise-sampling-method {euler, euler_a, heun, dpm2, dpm++2s_a, dpm++2m, dpm++2mv2, ipndm, ipndm_v, lcm, ddim_trailing, tcd}
                                      (high noise) sampling method (default: "euler_a")
   --high-noise-steps  STEPS          (high noise) number of sample steps (default: -1 = auto)
@@ -362,6 +359,9 @@ arguments:
   --clip-skip N                      ignore last_dot_pos layers of CLIP network; 1 ignores none, 2 ignores one layer (default: -1)
                                      <= 0 represents unspecified, will be 1 for SD1.x, 2 for SD2.x
   --vae-tiling                       process vae in tiles to reduce memory usage
+  --vae-tile-size [X]x[Y]            tile size for vae tiling (default: 32x32)
+  --vae-relative-tile-size [X]x[Y]   relative tile size for vae tiling, in fraction of image size if < 1, in number of tiles per dim if >=1 (overrides --vae-tile-size)
+  --vae-tile-overlap OVERLAP         tile overlap for vae tiling, in fraction of tile size (default: 0.5)
   --vae-on-cpu                       keep vae in cpu (for low vram)
   --clip-on-cpu                      keep clip in cpu (for low vram)
   --diffusion-fa                     use flash attention in the diffusion model (for low vram)
@@ -382,6 +382,7 @@ arguments:
   --moe-boundary BOUNDARY            timestep boundary for Wan2.2 MoE model. (default: 0.875)
                                      only enabled if `--high-noise-steps` is set to -1
   --flow-shift SHIFT                 shift value for Flow models like SD3.x or WAN (default: auto)
+  --vace-strength                    wan vace strength
   -v, --verbose                      print extra info
 ```
 
@@ -391,9 +392,9 @@ arguments:
 ./bin/sd -m ../models/sd-v1-4.ckpt -p "a lovely cat"
 # ./bin/sd -m ../models/v1-5-pruned-emaonly.safetensors -p "a lovely cat"
 # ./bin/sd -m ../models/sd_xl_base_1.0.safetensors --vae ../models/sdxl_vae-fp16-fix.safetensors -H 1024 -W 1024 -p "a lovely cat" -v
-# ./bin/sd -m ../models/sd3_medium_incl_clips_t5xxlfp16.safetensors -H 1024 -W 1024 -p 'a lovely cat holding a sign says \"Stable Diffusion CPP\"' --cfg-scale 4.5 --sampling-method euler -v
-# ./bin/sd --diffusion-model  ../models/flux1-dev-q3_k.gguf --vae ../models/ae.sft --clip_l ../models/clip_l.safetensors --t5xxl ../models/t5xxl_fp16.safetensors  -p "a lovely cat holding a sign says 'flux.cpp'" --cfg-scale 1.0 --sampling-method euler -v
-# ./bin/sd -m  ..\models\sd3.5_large.safetensors --clip_l ..\models\clip_l.safetensors --clip_g ..\models\clip_g.safetensors --t5xxl ..\models\t5xxl_fp16.safetensors  -H 1024 -W 1024 -p 'a lovely cat holding a sign says \"Stable diffusion 3.5 Large\"' --cfg-scale 4.5 --sampling-method euler -v
+# ./bin/sd -m ../models/sd3_medium_incl_clips_t5xxlfp16.safetensors -H 1024 -W 1024 -p 'a lovely cat holding a sign says \"Stable Diffusion CPP\"' --cfg-scale 4.5 --sampling-method euler -v --clip-on-cpu
+# ./bin/sd --diffusion-model  ../models/flux1-dev-q3_k.gguf --vae ../models/ae.sft --clip_l ../models/clip_l.safetensors --t5xxl ../models/t5xxl_fp16.safetensors  -p "a lovely cat holding a sign says 'flux.cpp'" --cfg-scale 1.0 --sampling-method euler -v --clip-on-cpu
+# ./bin/sd -m  ..\models\sd3.5_large.safetensors --clip_l ..\models\clip_l.safetensors --clip_g ..\models\clip_g.safetensors --t5xxl ..\models\t5xxl_fp16.safetensors  -H 1024 -W 1024 -p 'a lovely cat holding a sign says \"Stable diffusion 3.5 Large\"' --cfg-scale 4.5 --sampling-method euler -v --clip-on-cpu
 ```
 
 Using formats of different precisions will yield results of varying quality.
