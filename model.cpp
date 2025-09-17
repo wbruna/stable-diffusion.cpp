@@ -2024,6 +2024,7 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
     const size_t total_tensors_to_process = processed_tensor_storages.size();
     const int64_t t_start                 = ggml_time_ms();
     int last_n_threads                    = 1;
+    std::mutex tensor_backend_mutex;
 
     for (size_t file_index = 0; file_index < file_paths_.size(); file_index++) {
         std::string file_path = file_paths_[file_index];
@@ -2215,10 +2216,14 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
                             // copy to device memory
                             t1 = ggml_time_ms();
                             convert_time_ms.fetch_add(t1 - t0);
-                            t0 = ggml_time_ms();
-                            ggml_backend_tensor_set(dst_tensor, read_buffer.data(), 0, ggml_nbytes(dst_tensor));
-                            t1 = ggml_time_ms();
-                            copy_to_backend_time_ms.fetch_add(t1 - t0);
+
+                            {
+                                std::lock_guard<std::mutex> lock(tensor_backend_mutex);
+                                t0 = ggml_time_ms();
+                                ggml_backend_tensor_set(dst_tensor, read_buffer.data(), 0, ggml_nbytes(dst_tensor));
+                                t1 = ggml_time_ms();
+                                copy_to_backend_time_ms.fetch_add(t1 - t0);
+                            }
                         } else {
                             // convert first, then copy to device memory
 
@@ -2226,10 +2231,14 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
                             convert_tensor((void*)read_buffer.data(), tensor_storage.type, (void*)convert_buffer.data(), dst_tensor->type, (int)tensor_storage.nelements() / (int)tensor_storage.ne[0], (int)tensor_storage.ne[0]);
                             t1 = ggml_time_ms();
                             convert_time_ms.fetch_add(t1 - t0);
-                            t0 = ggml_time_ms();
-                            ggml_backend_tensor_set(dst_tensor, convert_buffer.data(), 0, ggml_nbytes(dst_tensor));
-                            t1 = ggml_time_ms();
-                            copy_to_backend_time_ms.fetch_add(t1 - t0);
+
+                            {
+                                std::lock_guard<std::mutex> lock(tensor_backend_mutex);
+                                t0 = ggml_time_ms();
+                                ggml_backend_tensor_set(dst_tensor, convert_buffer.data(), 0, ggml_nbytes(dst_tensor));
+                                t1 = ggml_time_ms();
+                                copy_to_backend_time_ms.fetch_add(t1 - t0);
+                            }
                         }
                     }
                 }
