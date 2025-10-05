@@ -14,7 +14,7 @@
 
 #include "clip.hpp"
 #include "ggml_extend.hpp"
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 #include "tokenize_util.h"
 
 namespace Qwen {
