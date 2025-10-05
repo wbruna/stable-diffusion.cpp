@@ -492,6 +492,22 @@ namespace Qwen {
                         bool flash_attn                     = false)
             : GGMLRunner(backend, offload_params_to_cpu) {
             qwen_image_params.flash_attn = flash_attn;
+
+            int model_layers = 60;
+            int num_layers = 1;
+            for (int layer = model_layers; layer > num_layers; layer--) {
+                for (auto pair : tensor_types) {
+                    if (pair.first.find("model.diffusion_model.transformer_blocks." + std::to_string(layer-1) + ".attn.add_k_proj.bias") != std::string::npos) {
+                        num_layers = layer;
+                        break;
+                    }
+                }
+            }
+            if (num_layers < model_layers) {
+                LOG_INFO("Qwen Image: some layers missing, assuming pruned model");
+            }
+
+            qwen_image_params.num_layers = num_layers;
             qwen_image                   = QwenImageModel(qwen_image_params);
             qwen_image.init(params_ctx, tensor_types, prefix);
         }
