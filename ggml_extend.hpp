@@ -945,8 +945,12 @@ __STATIC_INLINE__ struct ggml_tensor* ggml_group_norm_32(struct ggml_context* ct
 __STATIC_INLINE__ struct ggml_tensor* ggml_nn_linear(struct ggml_context* ctx,
                                                      struct ggml_tensor* x,
                                                      struct ggml_tensor* w,
-                                                     struct ggml_tensor* b) {
+                                                     struct ggml_tensor* b,
+                                                     bool force_prec_f32 = false) {
     x = ggml_mul_mat(ctx, w, x);
+    if (force_prec_f32) {
+        ggml_mul_mat_set_prec(x, GGML_PREC_F32);
+    }
     if (b != NULL) {
         x = ggml_add_inplace(ctx, x, b);
     }
@@ -1959,6 +1963,7 @@ protected:
     int64_t out_features;
     bool bias;
     bool force_f32;
+    bool force_prec_f32;
 
     void init_params(struct ggml_context* ctx, const String2GGMLType& tensor_types = {}, const std::string prefix = "") {
         enum ggml_type wtype = get_type(prefix + "weight", tensor_types, GGML_TYPE_F32);
@@ -1976,11 +1981,13 @@ public:
     Linear(int64_t in_features,
            int64_t out_features,
            bool bias      = true,
-           bool force_f32 = false)
+           bool force_f32 = false,
+           bool force_prec_f32 = false)
         : in_features(in_features),
           out_features(out_features),
           bias(bias),
-          force_f32(force_f32) {}
+          force_f32(force_f32),
+          force_prec_f32(force_prec_f32) {}
 
     struct ggml_tensor* forward(struct ggml_context* ctx, struct ggml_tensor* x) {
         struct ggml_tensor* w = params["weight"];
@@ -1988,7 +1995,7 @@ public:
         if (bias) {
             b = params["bias"];
         }
-        return ggml_nn_linear(ctx, x, w, b);
+        return ggml_nn_linear(ctx, x, w, b, force_prec_f32);
     }
 };
 
