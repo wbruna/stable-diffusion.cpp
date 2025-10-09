@@ -493,11 +493,16 @@ namespace Qwen {
             : GGMLRunner(backend, offload_params_to_cpu) {
             qwen_image_params.flash_attn = flash_attn;
 
-            int model_layers = 60;
-            int num_layers = 1;
+            int model_layers         = qwen_image_params.num_layers;
+            int num_layers           = 1;
+            std::string layer_prefix = "transformer_blocks.";
+            if (prefix.size() > 0) {
+                layer_prefix = prefix + "." + layer_prefix;
+            }
             for (int layer = model_layers; layer > num_layers; layer--) {
+                std::string layer_name = layer_prefix + std::to_string(layer-1) + ".attn.add_k_proj.bias";
                 for (auto pair : tensor_types) {
-                    if (pair.first.find("model.diffusion_model.transformer_blocks." + std::to_string(layer-1) + ".attn.add_k_proj.bias") != std::string::npos) {
+                    if (pair.first.find(layer_name) != std::string::npos) {
                         num_layers = layer;
                         break;
                     }
