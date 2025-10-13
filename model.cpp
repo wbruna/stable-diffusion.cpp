@@ -1,4 +1,5 @@
 #include <stdarg.h>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <fstream>
@@ -16,6 +17,7 @@
 #include "stable-diffusion.h"
 #include "util.h"
 #include "vocab.hpp"
+#include "vocab_qwen.hpp"
 #include "vocab_umt5.hpp"
 
 #include "ggml-alloc.h"
@@ -109,6 +111,8 @@ const char* unused_tensors[] = {
     "embedding_manager",
     "denoiser.sigmas",
     "text_encoders.t5xxl.transformer.encoder.embed_tokens.weight",  // only used during training
+    "text_encoders.qwen2vl.output.weight",
+    "text_encoders.qwen2vl.lm_head.",
 };
 
 bool is_unused_tensor(std::string name) {
@@ -192,6 +196,39 @@ std::unordered_map<std::string, std::string> pmid_v2_name_map = {
      "pmid.qformer_perceiver.token_proj.fc2.weight"},
 };
 
+std::unordered_map<std::string, std::string> qwenvl_name_map{
+    {"token_embd.", "model.embed_tokens."},
+    {"blk.", "model.layers."},
+    {"attn_q.", "self_attn.q_proj."},
+    {"attn_k.", "self_attn.k_proj."},
+    {"attn_v.", "self_attn.v_proj."},
+    {"attn_output.", "self_attn.o_proj."},
+    {"attn_norm.", "input_layernorm."},
+    {"ffn_down.", "mlp.down_proj."},
+    {"ffn_gate.", "mlp.gate_proj."},
+    {"ffn_up.", "mlp.up_proj."},
+    {"ffn_norm.", "post_attention_layernorm."},
+    {"output_norm.", "model.norm."},
+};
+
+std::unordered_map<std::string, std::string> qwenvl_vision_name_map{
+    {"mm.", "merger.mlp."},
+    {"v.post_ln.", "merger.ln_q."},
+    {"v.patch_embd.weight", "patch_embed.proj.0.weight"},
+    {"patch_embed.proj.0.weight.1", "patch_embed.proj.1.weight"},
+    {"v.patch_embd.weight.1", "patch_embed.proj.1.weight"},
+    {"v.blk.", "blocks."},
+    {"attn_q.", "attn.q_proj."},
+    {"attn_k.", "attn.k_proj."},
+    {"attn_v.", "attn.v_proj."},
+    {"attn_out.", "attn.proj."},
+    {"ffn_down.", "mlp.down_proj."},
+    {"ffn_gate.", "mlp.gate_proj."},
+    {"ffn_up.", "mlp.up_proj."},
+    {"ln1.", "norm1."},
+    {"ln2.", "norm2."},
+};
+
 std::string convert_cond_model_name(const std::string& name) {
     std::string new_name = name;
     std::string prefix;
@@ -248,6 +285,22 @@ std::string convert_cond_model_name(const std::string& name) {
         pos = new_name.find("attn_rel_b.");
         if (pos != std::string::npos) {
             new_name.replace(pos, 11, "layer.0.SelfAttention.relative_attention_bias.");
+        }
+    } else if (contains(name, "qwen2vl")) {
+        if (contains(name, "qwen2vl.visual")) {
+            for (auto kv : qwenvl_vision_name_map) {
+                size_t pos = new_name.find(kv.first);
+                if (pos != std::string::npos) {
+                    new_name.replace(pos, kv.first.size(), kv.second);
+                }
+            }
+        } else {
+            for (auto kv : qwenvl_name_map) {
+                size_t pos = new_name.find(kv.first);
+                if (pos != std::string::npos) {
+                    new_name.replace(pos, kv.first.size(), kv.second);
+                }
+            }
         }
     } else if (name == "text_encoders.t5xxl.transformer.token_embd.weight") {
         new_name = "text_encoders.t5xxl.transformer.shared.weight";
@@ -579,7 +632,11 @@ std::string convert_tensor_name(std::string name) {
     //     name.replace(pos, strlen("lora_B"), "lora_down");
     // }
     std::string new_name = name;
-    if (starts_with(name, "cond_stage_model.") || starts_with(name, "conditioner.embedders.") || starts_with(name, "text_encoders.") || ends_with(name, ".vision_model.visual_projection.weight")) {
+    if (starts_with(name, "cond_stage_model.") ||
+        starts_with(name, "conditioner.embedders.") ||
+        starts_with(name, "text_encoders.") ||
+        ends_with(name, ".vision_model.visual_projection.weight") ||
+        starts_with(name, "qwen2vl")) {
         new_name = convert_cond_model_name(name);
     } else if (starts_with(name, "first_stage_model.decoder")) {
         new_name = convert_vae_decoder_name(name);
@@ -698,6 +755,7 @@ void preprocess_tensor(TensorStorage tensor_storage,
 
     // convert unet transformer linear to conv2d 1x1
     if (starts_with(new_name, "model.diffusion_model.") &&
+        !starts_with(new_name, "model.diffusion_model.proj_out.") &&
         (ends_with(new_name, "proj_in.weight") || ends_with(new_name, "proj_out.weight"))) {
         tensor_storage.unsqueeze();
     }
@@ -1731,6 +1789,9 @@ SDVersion ModelLoader::get_sd_version() {
             if (tensor_storage.name.find("model.diffusion_model.joint_blocks.") != std::string::npos) {
                 return VERSION_SD3;
             }
+            if (tensor_storage.name.find("model.diffusion_model.transformer_blocks.0.img_mod.1.weight") != std::string::npos) {
+                return VERSION_QWEN_IMAGE;
+            }
             if (tensor_storage.name.find("model.diffusion_model.blocks.0.cross_attn.norm_k.weight") != std::string::npos) {
                 is_wan = true;
             }
@@ -1802,9 +1863,14 @@ SDVersion ModelLoader::get_sd_version() {
     }
 
     if (is_flux) {
-        is_inpaint = input_block_weight.ne[0] == 384;
-        if (is_inpaint) {
+        if (input_block_weight.ne[0] == 384) {
             return VERSION_FLUX_FILL;
+        }
+        if (input_block_weight.ne[0] == 128) {
+            return VERSION_FLUX_CONTROLS;
+        }
+        if (input_block_weight.ne[0] == 196) {
+            return VERSION_FLEX_2;
         }
         return VERSION_FLUX;
     }
@@ -1939,6 +2005,11 @@ std::string ModelLoader::load_merges() {
     return merges_utf8_str;
 }
 
+std::string ModelLoader::load_qwen2_merges() {
+    std::string merges_utf8_str(reinterpret_cast<const char*>(qwen2_merges_utf8_c_str), sizeof(qwen2_merges_utf8_c_str));
+    return merges_utf8_str;
+}
+
 std::string ModelLoader::load_t5_tokenizer_json() {
     std::string json_str(reinterpret_cast<const char*>(t5_tokenizer_json_str), sizeof(t5_tokenizer_json_str));
     return json_str;
@@ -1956,7 +2027,8 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
     std::atomic<int64_t> copy_to_backend_time_ms(0);
     std::atomic<int64_t> convert_time_ms(0);
 
-    int num_threads_to_use = n_threads_p > 0 ? n_threads_p : (int)std::thread::hardware_concurrency();
+    int num_threads_to_use = n_threads_p > 0 ? n_threads_p : get_num_physical_cores();
+    LOG_DEBUG("using %d threads for model loading", num_threads_to_use);
 
     int64_t start_time = ggml_time_ms();
     std::vector<TensorStorage> processed_tensor_storages;
@@ -2006,13 +2078,25 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb, int n_thread
             w.join();
         }
 
-        std::unordered_map<std::string, IndexedStorage> latest_map;
+        std::vector<IndexedStorage> deduplicated;
+        deduplicated.reserve(all_results.size());
+        std::unordered_map<std::string, size_t> name_to_pos;
         for (auto& entry : all_results) {
-            latest_map[entry.ts.name] = entry;
+            auto it = name_to_pos.find(entry.ts.name);
+            if (it == name_to_pos.end()) {
+                name_to_pos.emplace(entry.ts.name, deduplicated.size());
+                deduplicated.push_back(entry);
+            } else if (deduplicated[it->second].index < entry.index) {
+                deduplicated[it->second] = entry;
+            }
         }
 
-        processed_tensor_storages.reserve(latest_map.size());
-        for (auto& [name, entry] : latest_map) {
+        std::sort(deduplicated.begin(), deduplicated.end(), [](const IndexedStorage& a, const IndexedStorage& b) {
+            return a.index < b.index;
+        });
+
+        processed_tensor_storages.reserve(deduplicated.size());
+        for (auto& entry : deduplicated) {
             processed_tensor_storages.push_back(entry.ts);
         }
     }
@@ -2408,6 +2492,8 @@ bool ModelLoader::tensor_should_be_converted(const TensorStorage& tensor_storage
             // Pass, do not convert. For MMDiT
         } else if (contains(name, "time_embed.") || contains(name, "label_emb.")) {
             // Pass, do not convert. For Unet
+        } else if (contains(name, "embedding")) {
+            // Pass, do not convert embedding
         } else {
             return true;
         }

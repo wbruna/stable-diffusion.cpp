@@ -6,7 +6,7 @@
 
 /*================================================== CLIPTokenizer ===================================================*/
 
-std::pair<std::unordered_map<std::string, float>, std::string> extract_and_remove_lora(std::string text) {
+__STATIC_INLINE__ std::pair<std::unordered_map<std::string, float>, std::string> extract_and_remove_lora(std::string text) {
     std::regex re("<lora:([^:]+):([^>]+)>");
     std::smatch matches;
     std::unordered_map<std::string, float> filename2multiplier;
@@ -31,7 +31,7 @@ std::pair<std::unordered_map<std::string, float>, std::string> extract_and_remov
     return std::make_pair(filename2multiplier, text);
 }
 
-std::vector<std::pair<int, std::u32string>> bytes_to_unicode() {
+__STATIC_INLINE__ std::vector<std::pair<int, std::u32string>> bytes_to_unicode() {
     std::vector<std::pair<int, std::u32string>> byte_unicode_pairs;
     std::set<int> byte_set;
     for (int b = static_cast<int>('!'); b <= static_cast<int>('~'); ++b) {
@@ -553,12 +553,12 @@ protected:
     void init_params(struct ggml_context* ctx, const String2GGMLType& tensor_types = {}, const std::string prefix = "") {
         enum ggml_type token_wtype = GGML_TYPE_F32;
         if (!force_clip_f32) {
-            auto tensor_type = tensor_types.find(prefix + "token_embedding.weight");
-            if (tensor_type != tensor_types.end())
-                token_wtype = tensor_type->second;
+            token_wtype = get_type(prefix + "token_embedding.weight", tensor_types, GGML_TYPE_F32);
+            if (!support_get_rows(token_wtype)) {
+                token_wtype = GGML_TYPE_F32;
+            }
         }
-        enum ggml_type position_wtype = GGML_TYPE_F32;
-
+        enum ggml_type position_wtype       = GGML_TYPE_F32;
         params["token_embedding.weight"]    = ggml_new_tensor_2d(ctx, token_wtype, embed_dim, vocab_size);
         params["position_embedding.weight"] = ggml_new_tensor_2d(ctx, position_wtype, embed_dim, num_positions);
     }
