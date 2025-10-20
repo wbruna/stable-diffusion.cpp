@@ -16,6 +16,8 @@
 #include "tae.hpp"
 #include "vae.hpp"
 
+using std::isfinite;
+
 // #define STB_IMAGE_IMPLEMENTATION
 // #define STB_IMAGE_STATIC
 #include "stb_image.h"
