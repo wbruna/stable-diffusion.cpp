@@ -94,6 +94,7 @@ public:
     std::shared_ptr<RNG> rng = std::make_shared<STDDefaultRNG>();
     int n_threads            = -1;
     float scale_factor       = 0.18215f;
+    float shift_factor       = 0.f;
 
     std::shared_ptr<Conditioner> cond_stage_model;
     std::shared_ptr<FrozenCLIPVisionEmbedder> clip_vision;  // for svd or wan2.1 i2v
@@ -324,9 +325,10 @@ public:
             scale_factor = 0.13025f;
         } else if (sd_version_is_sd3(version)) {
             scale_factor = 1.5305f;
+            shift_factor = 0.0609f;
         } else if (sd_version_is_flux(version)) {
             scale_factor = 0.3611f;
-            // TODO: shift_factor
+            shift_factor = 0.1159f;
         } else if (sd_version_is_wan(version) || sd_version_is_qwen_image(version)) {
             scale_factor = 1.0f;
         }
@@ -759,11 +761,14 @@ public:
                 denoiser = std::make_shared<DiscreteFlowDenoiser>(shift);
             } else if (sd_version_is_flux(version)) {
                 LOG_INFO("running in Flux FLOW mode");
-                float shift = 1.0f;  // TODO: validate
-                for (auto pair : model_loader.tensor_storages_types) {
-                    if (pair.first.find("model.diffusion_model.guidance_in.in_layer.weight") != std::string::npos) {
-                        shift = 1.15f;
-                        break;
+                float shift = sd_ctx_params->flow_shift;
+                if (shift == INFINITY) {
+                    shift = 1.0f;  // TODO: validate
+                    for (auto pair : model_loader.tensor_storages_types) {
+                        if (pair.first.find("model.diffusion_model.guidance_in.in_layer.weight") != std::string::npos) {
+                            shift = 1.15f;
+                            break;
+                        }
                     }
                 }
                 denoiser = std::make_shared<FluxFlowDenoiser>(shift);
@@ -1404,7 +1409,11 @@ public:
                 }
             }
         } else {
-            ggml_tensor_scale(latent, scale_factor);
+            ggml_tensor_iter(latent, [&](ggml_tensor* latent, int64_t i0, int64_t i1, int64_t i2, int64_t i3) {
+                float value = ggml_tensor_get_f32(latent, i0, i1, i2, i3);
+                value       = (value - shift_factor) * scale_factor;
+                ggml_tensor_set_f32(latent, value, i0, i1, i2, i3);
+            });
         }
     }
 
@@ -1444,7 +1453,11 @@ public:
                 }
             }
         } else {
-            ggml_tensor_scale(latent, 1.0f / scale_factor);
+            ggml_tensor_iter(latent, [&](ggml_tensor* latent, int64_t i0, int64_t i1, int64_t i2, int64_t i3) {
+                float value = ggml_tensor_get_f32(latent, i0, i1, i2, i3);
+                value       = (value / scale_factor) + shift_factor;
+                ggml_tensor_set_f32(latent, value, i0, i1, i2, i3);
+            });
         }
     }
 
