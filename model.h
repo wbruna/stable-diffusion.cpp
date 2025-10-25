@@ -14,7 +14,7 @@
 #include "ggml-backend.h"
 #include "ggml.h"
 #include "gguf.h"
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 #include "zip.h"
 
 #define SD_MAX_DIMS 5
@@ -258,6 +258,7 @@ public:
     String2GGMLType tensor_storages_types;
 
     bool init_from_file(const std::string& file_path, const std::string& prefix = "");
+    bool has_diffusion_model_tensors();
     bool model_is_unet();
     SDVersion get_sd_version();
     std::map<ggml_type, uint32_t> get_wtype_stat();

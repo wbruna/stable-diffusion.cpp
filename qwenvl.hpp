@@ -16,7 +16,7 @@
 
 #include "clip.hpp"
 #include "ggml_extend.hpp"
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 #include "rope.hpp"
 #include "tokenize_util.h"
 

@@ -12,6 +12,9 @@
 #include <vector>
 #include "preprocessing.hpp"
 
+#include <inttypes.h>
+#include <cinttypes>
+
 #if defined(__APPLE__) && defined(__MACH__)
 #include <sys/sysctl.h>
 #include <sys/types.h>
@@ -26,7 +29,7 @@
 #include "ggml.h"
 #include "stable-diffusion.h"
 
-#define STB_IMAGE_RESIZE_IMPLEMENTATION
+// #define STB_IMAGE_RESIZE_IMPLEMENTATION //already defined
 #include "stb_image_resize.h"
 
 bool ends_with(const std::string& str, const std::string& ending) {
@@ -57,19 +60,6 @@ void replace_all_chars(std::string& str, char target, char replacement) {
             str[i] = replacement;
         }
     }
-}
-
-std::string format(const char* fmt, ...) {
-    va_list ap;
-    va_list ap2;
-    va_start(ap, fmt);
-    va_copy(ap2, ap);
-    int size = vsnprintf(nullptr, 0, fmt, ap);
-    std::vector<char> buf(size + 1);
-    int size2 = vsnprintf(buf.data(), size + 1, fmt, ap2);
-    va_end(ap2);
-    va_end(ap);
-    return std::string(buf.data(), size);
 }
 
 int round_up_to(int value, int base) {
@@ -150,7 +140,7 @@ std::string get_full_path(const std::string& dir, const std::string& filename) {
 // get_num_physical_cores is copy from
 // https://github.com/ggerganov/llama.cpp/blob/master/examples/common.cpp
 // LICENSE: https://github.com/ggerganov/llama.cpp/blob/master/LICENSE
-int32_t get_num_physical_cores() {
+int32_t sd_get_num_physical_cores() {
 #ifdef __linux__
     // enumerate the set of thread siblings, num entries is num cores
     std::unordered_set<std::string> siblings;
@@ -248,12 +238,19 @@ std::vector<std::string> split_string(const std::string& str, char delimiter) {
     return result;
 }
 
+
+static int sdloglevel = 0; //-1 = hide all, 0 = normal, 1 = showall
+static bool sdquiet = false;
 void pretty_progress(int step, int steps, float time) {
     if (sd_progress_cb) {
         sd_progress_cb(step, steps, time, sd_progress_cb_data);
         return;
     }
     if (step == 0) {
+        return;
+    }
+    if(sdloglevel<0 || sdquiet)
+    {
         return;
     }
     std::string progress = "  |";
@@ -300,6 +297,29 @@ static sd_log_cb_t sd_log_cb = nullptr;
 void* sd_log_cb_data         = nullptr;
 
 #define LOG_BUFFER_SIZE 4096
+
+void log_message(const char* format, ...) {
+    if (sdloglevel>0) {
+        printf("\n");
+        va_list args;
+        va_start(args, format);
+        vprintf(format, args);
+        va_end(args);
+        fflush(stdout);
+    }
+}
+void set_sd_log_level(int log)
+{
+    sdloglevel = log;
+}
+bool get_sd_log_level()
+{
+    return sdloglevel;
+}
+void set_sd_quiet(bool quiet)
+{
+    sdquiet = quiet;
+}
 
 void log_printf(sd_log_level_t level, const char* file, int line, const char* format, ...) {
     va_list args;

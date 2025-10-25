@@ -14,8 +14,6 @@ bool ends_with(const std::string& str, const std::string& ending);
 bool starts_with(const std::string& str, const std::string& start);
 bool contains(const std::string& str, const std::string& substr);
 
-std::string format(const char* fmt, ...);
-
 void replace_all_chars(std::string& str, char target, char replacement);
 
 int round_up_to(int value, int base);
@@ -54,8 +52,16 @@ std::string trim(const std::string& s);
 
 std::vector<std::pair<std::string, float>> parse_prompt_attention(const std::string& text);
 
-#define LOG_DEBUG(format, ...) log_printf(SD_LOG_DEBUG, __FILE__, __LINE__, format, ##__VA_ARGS__)
-#define LOG_INFO(format, ...) log_printf(SD_LOG_INFO, __FILE__, __LINE__, format, ##__VA_ARGS__)
-#define LOG_WARN(format, ...) log_printf(SD_LOG_WARN, __FILE__, __LINE__, format, ##__VA_ARGS__)
-#define LOG_ERROR(format, ...) log_printf(SD_LOG_ERROR, __FILE__, __LINE__, format, ##__VA_ARGS__)
+void log_message(const char* format, ...);
+void set_sd_log_level(int log);
+bool get_sd_log_level();
+void set_sd_quiet(bool quiet);
+#define LOG_DEBUG(...)  log_message(__VA_ARGS__)
+#define LOG_INFO(...)  log_message(__VA_ARGS__)
+#define LOG_WARN(...)  log_message(__VA_ARGS__)
+#define LOG_ERROR(...)  log_message(__VA_ARGS__)
+// #define LOG_DEBUG(format, ...) log_printf(SD_LOG_DEBUG, __FILE__, __LINE__, format, ##__VA_ARGS__)
+// #define LOG_INFO(format, ...) log_printf(SD_LOG_INFO, __FILE__, __LINE__, format, ##__VA_ARGS__)
+// #define LOG_WARN(format, ...) log_printf(SD_LOG_WARN, __FILE__, __LINE__, format, ##__VA_ARGS__)
+// #define LOG_ERROR(format, ...) log_printf(SD_LOG_ERROR, __FILE__, __LINE__, format, ##__VA_ARGS__)
 #endif  // __UTIL_H__

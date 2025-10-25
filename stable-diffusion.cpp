@@ -16,9 +16,14 @@
 #include "tae.hpp"
 #include "vae.hpp"
 
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_STATIC
+using std::isfinite;
+
+// #define STB_IMAGE_IMPLEMENTATION
+// #define STB_IMAGE_STATIC
 #include "stb_image.h"
+
+#include <inttypes.h>
+#include <cinttypes>
 
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #define STB_IMAGE_WRITE_STATIC
@@ -139,6 +144,17 @@ public:
         ggml_backend_free(backend);
     }
 
+    std::string toLowerCase(const std::string& str) {
+        std::string result;
+        std::locale loc;
+
+        for (char ch : str) {
+            result += std::tolower(ch, loc); // Use locale-aware tolower
+        }
+
+        return result;
+    }
+
     void init_backend() {
 #ifdef SD_USE_CUDA
         LOG_DEBUG("Using CUDA backend");
@@ -195,6 +211,11 @@ public:
 
         init_backend();
 
+        std::string taesd_path_fixed = taesd_path;
+        std::string t5_path_fixed = SAFE_STR(sd_ctx_params->t5xxl_path);
+        std::string clipl_path_fixed = SAFE_STR(sd_ctx_params->clip_l_path);
+        std::string clipg_path_fixed = SAFE_STR(sd_ctx_params->clip_g_path);
+
         ModelLoader model_loader;
 
         if (strlen(SAFE_STR(sd_ctx_params->model_path)) > 0) {
@@ -219,20 +240,68 @@ public:
         }
 
         bool is_unet = model_loader.model_is_unet();
+        int tempver = model_loader.get_sd_version();
+        bool iswan = (tempver==VERSION_WAN2 || tempver==VERSION_WAN2_2_I2V || tempver==VERSION_WAN2_2_TI2V);
+        bool isqwenimg = (tempver==VERSION_QWEN_IMAGE);
 
-        if (strlen(SAFE_STR(sd_ctx_params->clip_l_path)) > 0) {
-            LOG_INFO("loading clip_l from '%s'", sd_ctx_params->clip_l_path);
-            std::string prefix = is_unet ? "cond_stage_model.transformer." : "text_encoders.clip_l.transformer.";
-            if (!model_loader.init_from_file(sd_ctx_params->clip_l_path, prefix)) {
-                LOG_WARN("loading clip_l from '%s' failed", sd_ctx_params->clip_l_path);
+        //kcpp qol fallback: if qwen image, and they loaded the qwen2vl as t5 by mistake
+        if(isqwenimg && t5_path_fixed!="")
+        {
+            if(clipl_path_fixed=="" && clipg_path_fixed=="")
+            {
+                clipl_path_fixed = t5_path_fixed;
+                t5_path_fixed = "";
+            }
+            else if(clipl_path_fixed=="" && clipg_path_fixed!="")
+            {
+                clipl_path_fixed = t5_path_fixed;
+                t5_path_fixed = "";
+            }
+            else if(clipl_path_fixed!="" && clipg_path_fixed=="")
+            {
+                //very tricky case. see if we can tell if clipl is an mmproj, if so move to right place
+                if(toLowerCase(clipl_path_fixed).find("mmproj") != std::string::npos)
+                {
+                    clipg_path_fixed = clipl_path_fixed;
+                    clipl_path_fixed = t5_path_fixed;
+                    t5_path_fixed = "";
+                }
             }
         }
 
-        if (strlen(SAFE_STR(sd_ctx_params->clip_g_path)) > 0) {
-            LOG_INFO("loading clip_g from '%s'", sd_ctx_params->clip_g_path);
+        if (clipl_path_fixed!="") {
+            LOG_INFO("loading clip_l from '%s'", clipl_path_fixed.c_str());
+            std::string prefix = is_unet ? "cond_stage_model.transformer." : "text_encoders.clip_l.transformer.";
+            if(iswan)
+            {
+                prefix = "cond_stage_model.transformer.";
+                LOG_INFO("swap clip_vision from '%s'", clipl_path_fixed.c_str());
+            }
+            if(isqwenimg)
+            {
+                prefix = "text_encoders.qwen2vl.";
+                LOG_INFO("swap qwen2vl from '%s'", clipl_path_fixed.c_str());
+            }
+            if (!model_loader.init_from_file(clipl_path_fixed.c_str(), prefix)) {
+                LOG_WARN("loading clip_l from '%s' failed", clipl_path_fixed.c_str());
+            }
+        }
+
+        if (clipg_path_fixed!="") {
+            LOG_INFO("loading clip_g from '%s'", clipg_path_fixed.c_str());
             std::string prefix = is_unet ? "cond_stage_model.1.transformer." : "text_encoders.clip_g.transformer.";
-            if (!model_loader.init_from_file(sd_ctx_params->clip_g_path, prefix)) {
-                LOG_WARN("loading clip_g from '%s' failed", sd_ctx_params->clip_g_path);
+            if(iswan)
+            {
+                prefix = "cond_stage_model.transformer.";
+                LOG_INFO("swap clip_vision from '%s'", clipg_path_fixed.c_str());
+            }
+            if(isqwenimg)
+            {
+                prefix = "text_encoders.qwen2vl.visual.";
+                LOG_INFO("swap qwen2vl mmproj from '%s'", clipg_path_fixed.c_str());
+            }
+            if (!model_loader.init_from_file(clipg_path_fixed.c_str(), prefix)) {
+                LOG_WARN("loading clip_g from '%s' failed", clipg_path_fixed.c_str());
             }
         }
 
@@ -244,10 +313,10 @@ public:
             }
         }
 
-        if (strlen(SAFE_STR(sd_ctx_params->t5xxl_path)) > 0) {
-            LOG_INFO("loading t5xxl from '%s'", sd_ctx_params->t5xxl_path);
-            if (!model_loader.init_from_file(sd_ctx_params->t5xxl_path, "text_encoders.t5xxl.transformer.")) {
-                LOG_WARN("loading t5xxl from '%s' failed", sd_ctx_params->t5xxl_path);
+        if (t5_path_fixed!="") {
+            LOG_INFO("loading t5xxl from '%s'", t5_path_fixed.c_str());
+            if (!model_loader.init_from_file(t5_path_fixed.c_str(), "text_encoders.t5xxl.transformer.")) {
+                LOG_WARN("loading t5xxl from '%s' failed", t5_path_fixed.c_str());
             }
         }
 
@@ -273,6 +342,24 @@ public:
         }
 
         version = model_loader.get_sd_version();
+
+        // kcpp fallback to separate diffusion model passed as model
+        if (version == VERSION_COUNT &&
+            strlen(SAFE_STR(sd_ctx_params->model_path)) > 0 &&
+            strlen(SAFE_STR(sd_ctx_params->diffusion_model_path)) == 0 &&
+            t5_path_fixed!="" )
+        {
+            bool endswithsafetensors = ends_with(sd_ctx_params->model_path, ".safetensors");
+            if(endswithsafetensors && !model_loader.has_diffusion_model_tensors())
+            {
+                LOG_INFO("SD Diffusion Model tensors missing! Fallback trying alternative tensor names...\n");
+                if (!model_loader.init_from_file(sd_ctx_params->model_path, "model.diffusion_model.")) {
+                    LOG_WARN("loading diffusion model from '%s' failed", sd_ctx_params->model_path);
+                }
+                version = model_loader.get_sd_version();
+            }
+        }
+
         if (version == VERSION_COUNT) {
             LOG_ERROR("get sd version from file failed: '%s'", SAFE_STR(sd_ctx_params->model_path));
             return false;
@@ -288,6 +375,43 @@ public:
         }
 
         LOG_INFO("Version: %s ", model_version_to_str[version]);
+
+        if(use_tiny_autoencoder) // kcpp
+        {
+            std::string to_search = "taesd.embd";
+            std::string to_replace = "";
+            if(sd_version_is_sd1(version) || sd_version_is_sd2(version))
+            {
+                to_replace = "taesd.embd";
+            }
+            else if(sd_version_is_sdxl(version))
+            {
+                to_replace = "taesd_xl.embd";
+            }
+            else if(sd_version_is_flux(version))
+            {
+                to_replace = "taesd_f.embd";
+            }
+            else if(sd_version_is_sd3(version))
+            {
+                to_replace = "taesd_3.embd";
+            }
+
+            if(to_replace!="")
+            {
+                size_t pos = taesd_path_fixed.find(to_search);
+                if (pos != std::string::npos) {
+                    taesd_path_fixed.replace(pos, to_search.length(), to_replace);
+                }
+            }
+            else
+            {
+                printf("\nCannot use TAESD: Unknown version %d. TAESD Disabled!\n",version);
+                taesd_path_fixed = "";
+                use_tiny_autoencoder = false;
+            }
+        }
+
         ggml_type wtype = (int)sd_ctx_params->wtype < std::min<int>(SD_TYPE_COUNT, GGML_TYPE_COUNT)
                               ? (ggml_type)sd_ctx_params->wtype
                               : GGML_TYPE_COUNT;
@@ -563,6 +687,9 @@ public:
                                                                    version);
             }
             if (strlen(SAFE_STR(sd_ctx_params->photo_maker_path)) > 0) {
+              if (version != VERSION_SDXL) { // kcpp
+                printf("\n!!!!\nWARNING: PhotoMaker is only compatible with SDXL models. PhotoMaker will be disabled!\n!!!!\n");
+              } else {
                 pmid_lora = std::make_shared<LoraModel>(backend, sd_ctx_params->photo_maker_path, "");
                 if (!pmid_lora->load_from_file(true, n_threads)) {
                     LOG_WARN("load photomaker lora tensors from %s failed", sd_ctx_params->photo_maker_path);
@@ -574,6 +701,7 @@ public:
                 } else {
                     stacked_id = true;
                 }
+              }
             }
             if (stacked_id) {
                 if (!pmid_model->alloc_params_buffer()) {
@@ -634,7 +762,7 @@ public:
             if (!use_tiny_autoencoder) {
                 vae_params_mem_size = first_stage_model->get_params_buffer_size();
             } else {
-                if (!tae_first_stage->load_from_file(taesd_path, n_threads)) {
+                if (!tae_first_stage->load_from_file(taesd_path_fixed, n_threads)) {
                     return false;
                 }
                 vae_params_mem_size = tae_first_stage->get_params_buffer_size();
@@ -849,7 +977,9 @@ public:
                 denoiser->scheduler = std::make_shared<SmoothStepSchedule>();
                 break;
             case DEFAULT:
-                // Don't touch anything.
+                // Reset back to discrete
+                LOG_INFO("running with discrete scheduler");
+                denoiser->scheduler = std::make_shared<DiscreteSchedule>();
                 break;
             default:
                 LOG_ERROR("Unknown scheduler %i", scheduler);
@@ -896,6 +1026,34 @@ public:
         int64_t t1 = ggml_time_ms();
         LOG_DEBUG("check is_using_v_parameterization_for_sd2, taking %.2fs", (t1 - t0) * 1.0f / 1000);
         return result < -1;
+    }
+
+    // kcpp
+    void apply_lora_from_file(const std::string& lora_path, float multiplier) {
+        int64_t t0                 = ggml_time_ms();
+        std::string st_file_path   = lora_path;
+        std::string file_path;
+        if (file_exists(st_file_path)) {
+            file_path = st_file_path;
+        } else {
+            LOG_WARN("can not find %s for lora %s", st_file_path.c_str(), lora_path.c_str());
+            return;
+        }
+        LoraModel lora(backend, file_path);
+        if (!lora.load_from_file(false, n_threads)) {
+            LOG_WARN("load lora tensors from %s failed", file_path.c_str());
+            return;
+        }
+
+        lora.multiplier = multiplier;
+        lora.apply(tensors, version, n_threads);
+        lora.free_params_buffer();
+
+        int64_t t1 = ggml_time_ms();
+
+        LOG_INFO("lora '%s' applied, taking %.2fs",
+                 lora_path.c_str(),
+                 (t1 - t0) * 1.0f / 1000);
     }
 
     void apply_lora(std::string lora_name, float multiplier) {
@@ -967,6 +1125,11 @@ public:
 
         for (auto& kv : lora_f2m) {
             LOG_DEBUG("lora %s:%.2f", kv.first.c_str(), kv.second);
+        }
+        //only use hardcoded lora for kcpp
+        if (!lora_f2m.empty()) {
+            lora_f2m.clear();
+            printf("\nWarning: not applying LoRAs requested by prompt!\n");
         }
         int64_t t0 = ggml_time_ms();
         apply_loras(lora_f2m);
@@ -1813,7 +1976,7 @@ void sd_ctx_params_init(sd_ctx_params_t* sd_ctx_params) {
     *sd_ctx_params                         = {};
     sd_ctx_params->vae_decode_only         = true;
     sd_ctx_params->free_params_immediately = true;
-    sd_ctx_params->n_threads               = get_num_physical_cores();
+    sd_ctx_params->n_threads               = sd_get_num_physical_cores();
     sd_ctx_params->wtype                   = SD_TYPE_COUNT;
     sd_ctx_params->rng_type                = CUDA_RNG;
     sd_ctx_params->prediction              = DEFAULT_PRED;

@@ -15,15 +15,15 @@
 #include "stable-diffusion.h"
 
 #define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_STATIC
+//#define STB_IMAGE_STATIC
 #include "stb_image.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#define STB_IMAGE_WRITE_STATIC
+//#define STB_IMAGE_WRITE_STATIC
 #include "stb_image_write.h"
 
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
-#define STB_IMAGE_RESIZE_STATIC
+//#define STB_IMAGE_RESIZE_STATIC
 #include "stb_image_resize.h"
 
 #include "avi_writer.h"
@@ -1118,7 +1118,7 @@ void parse_args(int argc, const char** argv, SDParams& params) {
     }
 
     if (params.n_threads <= 0) {
-        params.n_threads = get_num_physical_cores();
+        params.n_threads = sd_get_num_physical_cores();
     }
 
     if ((params.mode == IMG_GEN || params.mode == VID_GEN) && params.prompt.length() == 0) {
