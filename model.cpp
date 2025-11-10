@@ -1846,6 +1846,9 @@ SDVersion ModelLoader::get_sd_version() {
         if (is_inpaint) {
             return VERSION_SD2_INPAINT;
         }
+        if (!has_middle_block_1) {
+            return VERSION_SD2_TINY_UNET;
+        }
         return VERSION_SD2;
     }
     return VERSION_COUNT;

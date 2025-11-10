@@ -23,6 +23,7 @@ const char* model_version_to_str[] = {
     "SD 1.x Tiny UNet",
     "SD 2.x",
     "SD 2.x Inpaint",
+    "SD 2.x Tiny UNet",
     "SDXL",
     "SDXL Inpaint",
     "SDXL Instruct-Pix2Pix",
@@ -1803,7 +1804,9 @@ public:
         } else {
             latent = gaussian_latent_sample(work_ctx, vae_output);
         }
-        process_latent_in(latent);
+        if (!use_tiny_autoencoder) {
+            process_latent_in(latent);
+        }
         if (sd_version_is_qwen_image(version)) {
             latent = ggml_reshape_4d(work_ctx, latent, latent->ne[0], latent->ne[1], latent->ne[3], 1);
         }
@@ -2355,7 +2358,7 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
             }
 
             ggml_ext_tensor_iter(init_img, [&](ggml_tensor* init_img, int64_t i0, int64_t i1, int64_t i2, int64_t i3) {
-                float value = sd_image_get_f32(processed_id_images[i3], i0, i1, i2);
+                float value = sd_image_get_f32(processed_id_images[i3], i0, i1, i2, false);
                 ggml_ext_tensor_set_f32(init_img, value, i0, i1, i2, i3);
             });
 
@@ -2378,18 +2381,24 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
                 id_embeds = load_tensor_from_file(work_ctx, pm_params.id_embed_path);
                 // print_ggml_tensor(id_embeds, true, "id_embeds:");
             }
-            id_cond.c_crossattn = sd_ctx->sd->id_encoder(work_ctx, init_img, id_cond.c_crossattn, id_embeds, class_tokens_mask);
-            int64_t t1          = ggml_time_ms();
-            LOG_INFO("Photomaker ID Stacking, taking %" PRId64 " ms", t1 - t0);
-            if (sd_ctx->sd->free_params_immediately) {
-                sd_ctx->sd->pmid_model->free_params_buffer();
-            }
-            // Encode input prompt without the trigger word for delayed conditioning
-            prompt_text_only = sd_ctx->sd->cond_stage_model->remove_trigger_from_prompt(work_ctx, prompt);
-            // printf("%s || %s \n", prompt.c_str(), prompt_text_only.c_str());
-            prompt = prompt_text_only;  //
-            if (sample_steps < 50) {
-                LOG_WARN("It's recommended to use >= 50 steps for photo maker!");
+            if (pmv2 && id_embeds == nullptr) {
+                LOG_WARN("Provided PhotoMaker images, but NO valid ID embeds file for PM v2");
+                LOG_WARN("Turn off PhotoMaker");
+                sd_ctx->sd->stacked_id = false;
+            } else {
+                id_cond.c_crossattn = sd_ctx->sd->id_encoder(work_ctx, init_img, id_cond.c_crossattn, id_embeds, class_tokens_mask);
+                int64_t t1          = ggml_time_ms();
+                LOG_INFO("Photomaker ID Stacking, taking %" PRId64 " ms", t1 - t0);
+                if (sd_ctx->sd->free_params_immediately) {
+                    sd_ctx->sd->pmid_model->free_params_buffer();
+                }
+                // Encode input prompt without the trigger word for delayed conditioning
+                prompt_text_only = sd_ctx->sd->cond_stage_model->remove_trigger_from_prompt(work_ctx, prompt);
+                // printf("%s || %s \n", prompt.c_str(), prompt_text_only.c_str());
+                prompt = prompt_text_only;  //
+                if (sample_steps < 50) {
+                    LOG_WARN("It's recommended to use >= 50 steps for photo maker!");
+                }
             }
         } else {
             LOG_WARN("Provided PhotoMaker model file, but NO input ID images");
