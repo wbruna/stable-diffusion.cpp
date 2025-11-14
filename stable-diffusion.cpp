@@ -1064,25 +1064,20 @@ public:
 
     // kcpp
     void apply_lora_from_file(const std::string& lora_path, float multiplier) {
-        int64_t t0                 = ggml_time_ms();
-        std::string st_file_path   = lora_path;
-        std::string file_path;
-        if (file_exists(st_file_path)) {
-            file_path = st_file_path;
+        std::unordered_map<std::string, float> lora_f2m;  // lora_name -> multiplier
+
+        lora_f2m[lora_path] = multiplier;
+
+        LOG_DEBUG("lora %s:%.2f", lora_path.c_str(), multiplier);
+
+        int64_t t0 = ggml_time_ms();
+        if (apply_lora_immediately) {
+            LOG_INFO("apply lora immediately");
+            apply_loras_immediately(lora_f2m);
         } else {
-            LOG_WARN("can not find %s for lora %s", st_file_path.c_str(), lora_path.c_str());
-            return;
+            LOG_INFO("apply at runtime");
+            apply_loras_at_runtime(lora_f2m);
         }
-        LoraModel lora(file_path, backend, file_path, "", version);
-        if (!lora.load_from_file(n_threads)) {
-            LOG_WARN("load lora tensors from %s failed", file_path.c_str());
-            return;
-        }
-
-        lora.multiplier = multiplier;
-        lora.apply(tensors, version, n_threads);
-        lora.free_params_buffer();
-
         int64_t t1 = ggml_time_ms();
 
         LOG_INFO("lora '%s' applied, taking %.2fs",
@@ -1094,6 +1089,17 @@ public:
                                                          float multiplier,
                                                          ggml_backend_t backend,
                                                          LoraModel::filter_t lora_tensor_filter = nullptr) {
+        // kcpp: LoRA is passed as a path
+        #if 1
+        std::string file_path = lora_id;
+        std::string lora_ident = std::filesystem::path(file_path).stem();
+
+        if (!file_exists(file_path)) {
+            LOG_WARN("can not find lora file %s", file_path.c_str());
+            return nullptr;
+        }
+        auto lora = std::make_shared<LoraModel>(lora_ident, backend, file_path, "", version);
+        #else
         std::string lora_name      = lora_id;
         std::string high_noise_tag = "|high_noise|";
         bool is_high_noise         = false;
@@ -1114,6 +1120,7 @@ public:
             return nullptr;
         }
         auto lora = std::make_shared<LoraModel>(lora_id, backend, file_path, is_high_noise ? "model.high_noise_" : "", version);
+        #endif
         if (!lora->load_from_file(n_threads, lora_tensor_filter)) {
             LOG_WARN("load lora tensors from %s failed", file_path.c_str());
             return nullptr;
@@ -1294,11 +1301,12 @@ public:
         for (auto& kv : lora_f2m) {
             LOG_DEBUG("lora %s:%.2f", kv.first.c_str(), kv.second);
         }
-        //only use hardcoded lora for kcpp
+        #if 1 // kcpp
+        //only use hardcoded lora
         if (!lora_f2m.empty()) {
-            lora_f2m.clear();
             printf("\nWarning: not applying LoRAs requested by prompt!\n");
         }
+        #else
         int64_t t0 = ggml_time_ms();
         if (apply_lora_immediately) {
             LOG_INFO("apply lora immediately");
@@ -1312,6 +1320,7 @@ public:
             LOG_INFO("apply_loras completed, taking %.2fs", (t1 - t0) * 1.0f / 1000);
             LOG_DEBUG("prompt after extract and remove lora: \"%s\"", result_pair.second.c_str());
         }
+        #endif
         return result_pair.second;
     }
 
