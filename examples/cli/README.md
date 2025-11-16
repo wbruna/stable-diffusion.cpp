@@ -94,7 +94,8 @@ Options:
   -M, --mode                               run mode, one of [img_gen, vid_gen, upscale, convert], default: img_gen
   --type                                   weight type (examples: f32, f16, q4_0, q4_1, q5_0, q5_1, q8_0, q2_K, q3_K, q4_K). If not specified, the default is the
                                            type of the weight file
-  --rng                                    RNG, one of [std_default, cuda], default: cuda
+  --rng                                    RNG, one of [std_default, cuda, cpu], default: cuda(sd-webui), cpu(comfyui)
+  --sampler-rng                            sampler RNG, one of [std_default, cuda, cpu]. If not specified, use --rng
   -s, --seed                               RNG seed (default: 42, use random seed for < 0)
   --sampling-method                        sampling method, one of [euler, euler_a, heun, dpm2, dpm++2s_a, dpm++2m, dpm++2mv2, ipndm, ipndm_v, lcm, ddim_trailing,
                                            tcd] (default: euler for Flux/SD3/Wan, euler_a otherwise)
@@ -103,7 +104,7 @@ Options:
                                            contain any quantized parameters, the at_runtime mode will be used; otherwise,
                                            immediately will be used.The immediately mode may have precision and
                                            compatibility issues with quantized parameters, but it usually offers faster inference
-                                           speed and, in some cases, lower memory usageThe at_runtime mode, on the other
+                                           speed and, in some cases, lower memory usage. The at_runtime mode, on the other
                                            hand, is exactly the opposite.
   --scheduler                              denoiser sigma scheduler, one of [discrete, karras, exponential, ays, gits, smoothstep, sgm_uniform, simple], default:
                                            discrete
