@@ -21,6 +21,8 @@
 #include "latent-preview.h"
 #include "name_conversion.h"
 
+#include <filesystem>
+
 const char* model_version_to_str[] = {
     "SD 1.x",
     "SD 1.x Inpaint",
@@ -1063,7 +1065,11 @@ public:
         // kcpp: LoRA is passed as a path
         #if 1
         std::string file_path = lora_id;
-        std::string lora_ident = std::filesystem::path(file_path).stem();
+        #ifdef _WIN32
+            std::string lora_ident = std::filesystem::u8path(file_path).stem().u8string();
+        #else
+            std::string lora_ident = std::filesystem::path(file_path).stem().string();
+        #endif
 
         if (!file_exists(file_path)) {
             LOG_WARN("can not find lora file %s", file_path.c_str());
