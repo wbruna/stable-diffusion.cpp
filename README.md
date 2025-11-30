@@ -15,6 +15,9 @@ API and command-line option may change frequently.***
 
 ## 🔥Important News
 
+* **2025/10/13** 🚀 stable-diffusion.cpp now supports **FLUX.2-dev**  
+  👉 Details: [PR #1016](https://github.com/leejet/stable-diffusion.cpp/pull/1016)
+
 * **2025/10/13** 🚀 stable-diffusion.cpp now supports **Qwen-Image-Edit / Qwen-Image-Edit 2509**  
   👉 Details: [PR #877](https://github.com/leejet/stable-diffusion.cpp/pull/877)
 
@@ -37,7 +40,8 @@ API and command-line option may change frequently.***
     - SDXL, [SDXL-Turbo](https://huggingface.co/stabilityai/sdxl-turbo)
     - [Some SD1.x and SDXL distilled models](./docs/distilled_sd.md)
     - [SD3/SD3.5](./docs/sd3.md)
-    - [Flux-dev/Flux-schnell](./docs/flux.md)
+    - [FlUX.1-dev/FlUX.1-schnell](./docs/flux.md)
+    - [FLUX.2-dev](./docs/flux2.md)
     - [Chroma](./docs/chroma.md)
     - [Chroma1-Radiance](./docs/chroma_radiance.md)
     - [Qwen Image](./docs/qwen_image.md)
@@ -118,7 +122,8 @@ If you want to improve performance or reduce VRAM/RAM usage, please refer to [pe
 
 - [SD1.x/SD2.x/SDXL](./docs/sd.md)
 - [SD3/SD3.5](./docs/sd3.md)
-- [Flux-dev/Flux-schnell](./docs/flux.md)
+- [FlUX.1-dev/FlUX.1-schnell](./docs/flux.md)
+- [FLUX.2-dev](./docs/flux2.md)
 - [FLUX.1-Kontext-dev](./docs/kontext.md)
 - [Chroma](./docs/chroma.md)
 - [🔥Qwen Image](./docs/qwen_image.md)
