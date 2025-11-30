@@ -1392,13 +1392,21 @@ std::string ModelLoader::load_qwen2_merges() {
 }
 
 std::string ModelLoader::load_mistral_merges() {
+#ifndef KCPP_NO_BAKE_SD_VOCAB
     std::string merges_utf8_str(reinterpret_cast<const char*>(mistral_merges_utf8_c_str), sizeof(mistral_merges_utf8_c_str));
     return merges_utf8_str;
+#else
+    return sd_load_mistral_merges();
+#endif
 }
 
 std::string ModelLoader::load_mistral_vocab_json() {
+#ifndef KCPP_NO_BAKE_SD_VOCAB
     std::string json_str(reinterpret_cast<const char*>(mistral_vocab_json_utf8_c_str), sizeof(mistral_vocab_json_utf8_c_str));
     return json_str;
+#else
+    return sd_load_mistral_vocab_json();
+#endif
 }
 
 std::string ModelLoader::load_t5_tokenizer_json() {
