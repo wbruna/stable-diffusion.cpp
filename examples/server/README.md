@@ -24,6 +24,7 @@ Context Options:
   --high-noise-diffusion-model <string>    path to the standalone high noise diffusion model
   --vae <string>                           path to standalone vae model
   --taesd <string>                         path to taesd. Using Tiny AutoEncoder for fast decoding (low quality)
+  --tae <string>                           alias of --taesd
   --control-net <string>                   path to control net model
   --embd-dir <string>                      embeddings directory
   --lora-model-dir <string>                lora model directory
@@ -113,7 +114,7 @@ Default Generation Options:
                                            tcd] (default: euler for Flux/SD3/Wan, euler_a otherwise)
   --high-noise-sampling-method             (high noise) sampling method, one of [euler, euler_a, heun, dpm2, dpm++2s_a, dpm++2m, dpm++2mv2, ipndm, ipndm_v, lcm,
                                            ddim_trailing, tcd] default: euler for Flux/SD3/Wan, euler_a otherwise
-  --scheduler                              denoiser sigma scheduler, one of [discrete, karras, exponential, ays, gits, smoothstep, sgm_uniform, simple, lcm],
+  --scheduler                              denoiser sigma scheduler, one of [discrete, karras, exponential, ays, gits, smoothstep, sgm_uniform, simple, kl_optimal, lcm],
                                            default: discrete
   --sigmas                                 custom sigma values for the sampler, comma-separated (e.g., "14.61,7.8,3.5,0.0").
   --skip-layers                            layers to skip for SLG steps (default: [7,8,9])
