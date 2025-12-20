@@ -416,6 +416,14 @@ public:
             {
                 to_replace = "taesd_3.embd";
             }
+            else if(version == VERSION_WAN2_2_TI2V)
+            {
+                to_replace = "taesd_w22.embd";
+            }
+            else if(sd_version_is_wan(version)||sd_version_is_qwen_image(version))
+            {
+                to_replace = "taesd_w21.embd";
+            }
 
             if(to_replace!="")
             {
