@@ -266,6 +266,7 @@ void sd_log_cb(enum sd_log_level_t level, const char* log, void* data) {
 struct LoraEntry {
     std::string name;
     std::string path;
+    std::string fullpath;
 };
 
 int main(int argc, const char** argv) {
@@ -321,7 +322,8 @@ int main(int argc, const char** argv) {
 
                 LoraEntry e;
                 e.name          = p.stem().u8string();
-                std::string rel = fs::relative(p, lora_dir).u8string();
+                e.fullpath      = p.u8string();
+                std::string rel = p.lexically_relative(lora_dir).u8string();
                 std::replace(rel.begin(), rel.end(), '\\', '/');
                 e.path = rel;
 
@@ -340,10 +342,11 @@ int main(int argc, const char** argv) {
         }
     };
 
-    auto is_valid_lora_path = [&](const std::string& path) -> bool {
+    auto get_lora_full_path = [&](const std::string& path) -> std::string {
         std::lock_guard<std::mutex> lock(lora_mutex);
-        return std::any_of(lora_cache.begin(), lora_cache.end(),
+        auto it = std::find_if(lora_cache.begin(), lora_cache.end(),
                            [&](const LoraEntry& e) { return e.path == path; });
+        return (it != lora_cache.end()) ? it->fullpath : "";
     };
 
     httplib::Server svr;
@@ -565,7 +568,8 @@ int main(int argc, const char** argv) {
             std::string sd_cpp_extra_args_str = extract_and_remove_sd_cpp_extra_args(prompt);
 
             size_t image_count = req.form.get_file_count("image[]");
-            if (image_count == 0) {
+            bool has_legacy_image = req.form.has_file("image");
+            if (image_count == 0 && !has_legacy_image) {
                 res.status = 400;
                 res.set_content(R"({"error":"at least one image[] required"})", "application/json");
                 return;
@@ -574,6 +578,10 @@ int main(int argc, const char** argv) {
             std::vector<std::vector<uint8_t>> images_bytes;
             for (size_t i = 0; i < image_count; i++) {
                 auto file = req.form.get_file("image[]", i);
+                images_bytes.emplace_back(file.content.begin(), file.content.end());
+            }
+            if (image_count == 0 && has_legacy_image) {
+                auto file = req.form.get_file("image");
                 images_bytes.emplace_back(file.content.begin(), file.content.end());
             }
 
@@ -862,11 +870,12 @@ int main(int argc, const char** argv) {
                         return bad("lora.path required");
                     }
 
-                    if (!is_valid_lora_path(path)) {
+                    std::string fullpath = get_lora_full_path(path);
+                    if (fullpath.empty()) {
                         return bad("invalid lora path: " + path);
                     }
 
-                    lora_path_storage.push_back(path);
+                    lora_path_storage.push_back(fullpath);
                     sd_lora_t l;
                     l.is_high_noise = is_high_noise;
                     l.multiplier    = multiplier;
