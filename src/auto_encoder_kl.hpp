@@ -1,4 +1,4 @@
-#ifndef __AUTO_ENCODER_KL_HPP__
+﻿#ifndef __AUTO_ENCODER_KL_HPP__
 #define __AUTO_ENCODER_KL_HPP__
 
 #include "vae.hpp"
@@ -29,7 +29,7 @@ public:
         }
     }
 
-    struct ggml_tensor* forward(GGMLRunnerContext* ctx, struct ggml_tensor* x) override {
+    ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) override {
         // x: [N, in_channels, h, w]
         // t_emb is always None
         auto norm1 = std::dynamic_pointer_cast<GroupNorm32>(blocks["norm1"]);
@@ -65,7 +65,7 @@ protected:
     int64_t in_channels;
     bool use_linear;
 
-    void init_params(struct ggml_context* ctx, const String2TensorStorage& tensor_storage_map = {}, const std::string prefix = "") {
+    void init_params(ggml_context* ctx, const String2TensorStorage& tensor_storage_map = {}, const std::string prefix = "") {
         auto iter = tensor_storage_map.find(prefix + "proj_out.weight");
         if (iter != tensor_storage_map.end()) {
             if (iter->second.n_dims == 4 && use_linear) {
@@ -101,7 +101,7 @@ public:
         }
     }
 
-    struct ggml_tensor* forward(GGMLRunnerContext* ctx, struct ggml_tensor* x) override {
+    ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) override {
         // x: [N, in_channels, h, w]
         auto norm     = std::dynamic_pointer_cast<GroupNorm32>(blocks["norm"]);
         auto q_proj   = std::dynamic_pointer_cast<UnaryBlock>(blocks["q"]);
@@ -178,8 +178,8 @@ public:
                                                                         {kernel_padding, 0, 0}));
     }
 
-    struct ggml_tensor* forward(GGMLRunnerContext* ctx,
-                                struct ggml_tensor* x) override {
+    ggml_tensor* forward(GGMLRunnerContext* ctx,
+                         ggml_tensor* x) override {
         // timesteps always None
         // skip_video always False
         // x: [N, IC, IH, IW]
@@ -208,7 +208,7 @@ public:
 
 class VideoResnetBlock : public ResnetBlock {
 protected:
-    void init_params(struct ggml_context* ctx, const String2TensorStorage& tensor_storage_map = {}, const std::string prefix = "") override {
+    void init_params(ggml_context* ctx, const String2TensorStorage& tensor_storage_map = {}, const std::string prefix = "") override {
         enum ggml_type wtype = get_type(prefix + "mix_factor", tensor_storage_map, GGML_TYPE_F32);
         params["mix_factor"] = ggml_new_tensor_1d(ctx, wtype, 1);
     }
@@ -227,7 +227,7 @@ public:
         blocks["time_stack"] = std::shared_ptr<GGMLBlock>(new ResBlock(out_channels, 0, out_channels, {video_kernel_size, 1}, 3, false, true));
     }
 
-    struct ggml_tensor* forward(GGMLRunnerContext* ctx, struct ggml_tensor* x) override {
+    ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) override {
         // x: [N, in_channels, h, w] aka [b*t, in_channels, h, w]
         // return: [N, out_channels, h, w] aka [b*t, out_channels, h, w]
         // t_emb is always None
@@ -317,7 +317,7 @@ public:
         blocks["conv_out"] = std::shared_ptr<GGMLBlock>(new Conv2d(block_in, double_z ? z_channels * 2 : z_channels, {3, 3}, {1, 1}, {1, 1}));
     }
 
-    virtual struct ggml_tensor* forward(GGMLRunnerContext* ctx, struct ggml_tensor* x) {
+    virtual ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) {
         // x: [N, in_channels, h, w]
 
         auto conv_in     = std::dynamic_pointer_cast<Conv2d>(blocks["conv_in"]);
@@ -435,7 +435,7 @@ public:
         blocks["conv_out"] = get_conv_out(block_in, out_ch, {3, 3}, {1, 1}, {1, 1});
     }
 
-    virtual struct ggml_tensor* forward(GGMLRunnerContext* ctx, struct ggml_tensor* z) {
+    virtual ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* z) {
         // z: [N, z_channels, h, w]
         // alpha is always 0
         // merge_strategy is always learned
@@ -549,7 +549,7 @@ public:
         }
     }
 
-    struct ggml_tensor* decode(GGMLRunnerContext* ctx, struct ggml_tensor* z) {
+    ggml_tensor* decode(GGMLRunnerContext* ctx, ggml_tensor* z) {
         // z: [N, z_channels, h, w]
         if (sd_version_is_flux2(version)) {
             // [N, C*p*p, h, w] -> [N, C, h*p, w*p]
@@ -581,7 +581,7 @@ public:
         return h;
     }
 
-    struct ggml_tensor* encode(GGMLRunnerContext* ctx, struct ggml_tensor* x) {
+    ggml_tensor* encode(GGMLRunnerContext* ctx, ggml_tensor* x) {
         // x: [N, in_channels, h, w]
         auto encoder = std::dynamic_pointer_cast<Encoder>(blocks["encoder"]);
 
@@ -613,6 +613,9 @@ public:
 
     int get_encoder_output_channels() {
         int factor = dd_config.double_z ? 2 : 1;
+        if (sd_version_is_flux2(version)) {
+            return dd_config.z_channels * 4;
+        }
         return dd_config.z_channels * factor;
     }
 };
@@ -678,202 +681,117 @@ struct AutoEncoderKL : public VAE {
         return "vae";
     }
 
-    void get_param_tensors(std::map<std::string, struct ggml_tensor*>& tensors, const std::string prefix) override {
+    void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors, const std::string prefix) override {
         ae.get_param_tensors(tensors, prefix);
     }
 
-    struct ggml_cgraph* build_graph(struct ggml_tensor* z, bool decode_graph) {
-        struct ggml_cgraph* gf = ggml_new_graph(compute_ctx);
-
-        z = to_backend(z);
+    ggml_cgraph* build_graph(const sd::Tensor<float>& z_tensor, bool decode_graph) {
+        ggml_cgraph* gf = ggml_new_graph(compute_ctx);
+        ggml_tensor* z  = make_input(z_tensor);
 
         auto runner_ctx = get_context();
 
-        struct ggml_tensor* out = decode_graph ? ae.decode(&runner_ctx, z) : ae.encode(&runner_ctx, z);
+        ggml_tensor* out = decode_graph ? ae.decode(&runner_ctx, z) : ae.encode(&runner_ctx, z);
 
         ggml_build_forward_expand(gf, out);
 
         return gf;
     }
 
-    bool _compute(const int n_threads,
-                  struct ggml_tensor* z,
-                  bool decode_graph,
-                  struct ggml_tensor** output,
-                  struct ggml_context* output_ctx = nullptr) override {
+    sd::Tensor<float> _compute(const int n_threads,
+                               const sd::Tensor<float>& z,
+                               bool decode_graph) override {
         GGML_ASSERT(!decode_only || decode_graph);
-        auto get_graph = [&]() -> struct ggml_cgraph* {
+        auto get_graph = [&]() -> ggml_cgraph* {
             return build_graph(z, decode_graph);
         };
-        // ggml_set_f32(z, 0.5f);
-        // print_ggml_tensor(z);
-        return GGMLRunner::compute(get_graph, n_threads, false, output, output_ctx);
+        return restore_trailing_singleton_dims(GGMLRunner::compute<float>(get_graph, n_threads, false), z.dim());
     }
 
-    ggml_tensor* gaussian_latent_sample(ggml_context* work_ctx, ggml_tensor* moments, std::shared_ptr<RNG> rng) {
+    sd::Tensor<float> gaussian_latent_sample(const sd::Tensor<float>& moments, std::shared_ptr<RNG> rng) {
         // ldm.modules.distributions.distributions.DiagonalGaussianDistribution.sample
-        ggml_tensor* latents      = ggml_new_tensor_4d(work_ctx, moments->type, moments->ne[0], moments->ne[1], moments->ne[2] / 2, moments->ne[3]);
-        struct ggml_tensor* noise = ggml_dup_tensor(work_ctx, latents);
-        ggml_ext_im_set_randn_f32(noise, rng);
-        {
-            float mean   = 0;
-            float logvar = 0;
-            float value  = 0;
-            float std_   = 0;
-            for (int i = 0; i < latents->ne[3]; i++) {
-                for (int j = 0; j < latents->ne[2]; j++) {
-                    for (int k = 0; k < latents->ne[1]; k++) {
-                        for (int l = 0; l < latents->ne[0]; l++) {
-                            mean   = ggml_ext_tensor_get_f32(moments, l, k, j, i);
-                            logvar = ggml_ext_tensor_get_f32(moments, l, k, j + (int)latents->ne[2], i);
-                            logvar = std::max(-30.0f, std::min(logvar, 20.0f));
-                            std_   = std::exp(0.5f * logvar);
-                            value  = mean + std_ * ggml_ext_tensor_get_f32(noise, l, k, j, i);
-                            // printf("%d %d %d %d -> %f\n", i, j, k, l, value);
-                            ggml_ext_tensor_set_f32(latents, value, l, k, j, i);
-                        }
-                    }
-                }
-            }
-        }
+        auto chunks               = sd::ops::chunk(moments, 2, 2);
+        const auto& mean          = chunks[0];
+        const auto& logvar        = chunks[1];
+        sd::Tensor<float> stddev  = sd::ops::exp(0.5f * sd::ops::clamp(logvar, -30.0f, 20.0f));
+        sd::Tensor<float> noise   = sd::Tensor<float>::randn_like(mean, rng);
+        sd::Tensor<float> latents = mean + stddev * noise;
         return latents;
     }
 
-    ggml_tensor* vae_output_to_latents(ggml_context* work_ctx, ggml_tensor* vae_output, std::shared_ptr<RNG> rng) {
+    sd::Tensor<float> vae_output_to_latents(const sd::Tensor<float>& vae_output, std::shared_ptr<RNG> rng) override {
         if (sd_version_is_flux2(version)) {
             return vae_output;
         } else if (version == VERSION_SD1_PIX2PIX) {
-            return ggml_view_3d(work_ctx,
-                                vae_output,
-                                vae_output->ne[0],
-                                vae_output->ne[1],
-                                vae_output->ne[2] / 2,
-                                vae_output->nb[1],
-                                vae_output->nb[2],
-                                0);
+            return sd::ops::chunk(vae_output, 2, 2)[0];
         } else {
-            return gaussian_latent_sample(work_ctx, vae_output, rng);
+            return gaussian_latent_sample(vae_output, rng);
         }
     }
 
-    void get_latents_mean_std_vec(ggml_tensor* latents, int channel_dim, std::vector<float>& latents_mean_vec, std::vector<float>& latents_std_vec) {
-        // flux2
+    std::pair<sd::Tensor<float>, sd::Tensor<float>> get_latents_mean_std(const sd::Tensor<float>& latents, int channel_dim) {
+        GGML_ASSERT(channel_dim >= 0 && static_cast<size_t>(channel_dim) < static_cast<size_t>(latents.dim()));
         if (sd_version_is_flux2(version)) {
-            GGML_ASSERT(latents->ne[channel_dim] == 128);
-            latents_mean_vec = {-0.0676f, -0.0715f, -0.0753f, -0.0745f, 0.0223f, 0.0180f, 0.0142f, 0.0184f,
-                                -0.0001f, -0.0063f, -0.0002f, -0.0031f, -0.0272f, -0.0281f, -0.0276f, -0.0290f,
-                                -0.0769f, -0.0672f, -0.0902f, -0.0892f, 0.0168f, 0.0152f, 0.0079f, 0.0086f,
-                                0.0083f, 0.0015f, 0.0003f, -0.0043f, -0.0439f, -0.0419f, -0.0438f, -0.0431f,
-                                -0.0102f, -0.0132f, -0.0066f, -0.0048f, -0.0311f, -0.0306f, -0.0279f, -0.0180f,
-                                0.0030f, 0.0015f, 0.0126f, 0.0145f, 0.0347f, 0.0338f, 0.0337f, 0.0283f,
-                                0.0020f, 0.0047f, 0.0047f, 0.0050f, 0.0123f, 0.0081f, 0.0081f, 0.0146f,
-                                0.0681f, 0.0679f, 0.0767f, 0.0732f, -0.0462f, -0.0474f, -0.0392f, -0.0511f,
-                                -0.0528f, -0.0477f, -0.0470f, -0.0517f, -0.0317f, -0.0316f, -0.0345f, -0.0283f,
-                                0.0510f, 0.0445f, 0.0578f, 0.0458f, -0.0412f, -0.0458f, -0.0487f, -0.0467f,
-                                -0.0088f, -0.0106f, -0.0088f, -0.0046f, -0.0376f, -0.0432f, -0.0436f, -0.0499f,
-                                0.0118f, 0.0166f, 0.0203f, 0.0279f, 0.0113f, 0.0129f, 0.0016f, 0.0072f,
-                                -0.0118f, -0.0018f, -0.0141f, -0.0054f, -0.0091f, -0.0138f, -0.0145f, -0.0187f,
-                                0.0323f, 0.0305f, 0.0259f, 0.0300f, 0.0540f, 0.0614f, 0.0495f, 0.0590f,
-                                -0.0511f, -0.0603f, -0.0478f, -0.0524f, -0.0227f, -0.0274f, -0.0154f, -0.0255f,
-                                -0.0572f, -0.0565f, -0.0518f, -0.0496f, 0.0116f, 0.0054f, 0.0163f, 0.0104f};
-            latents_std_vec  = {
-                 1.8029f, 1.7786f, 1.7868f, 1.7837f, 1.7717f, 1.7590f, 1.7610f, 1.7479f,
-                 1.7336f, 1.7373f, 1.7340f, 1.7343f, 1.8626f, 1.8527f, 1.8629f, 1.8589f,
-                 1.7593f, 1.7526f, 1.7556f, 1.7583f, 1.7363f, 1.7400f, 1.7355f, 1.7394f,
-                 1.7342f, 1.7246f, 1.7392f, 1.7304f, 1.7551f, 1.7513f, 1.7559f, 1.7488f,
-                 1.8449f, 1.8454f, 1.8550f, 1.8535f, 1.8240f, 1.7813f, 1.7854f, 1.7945f,
-                 1.8047f, 1.7876f, 1.7695f, 1.7676f, 1.7782f, 1.7667f, 1.7925f, 1.7848f,
-                 1.7579f, 1.7407f, 1.7483f, 1.7368f, 1.7961f, 1.7998f, 1.7920f, 1.7925f,
-                 1.7780f, 1.7747f, 1.7727f, 1.7749f, 1.7526f, 1.7447f, 1.7657f, 1.7495f,
-                 1.7775f, 1.7720f, 1.7813f, 1.7813f, 1.8162f, 1.8013f, 1.8023f, 1.8033f,
-                 1.7527f, 1.7331f, 1.7563f, 1.7482f, 1.7610f, 1.7507f, 1.7681f, 1.7613f,
-                 1.7665f, 1.7545f, 1.7828f, 1.7726f, 1.7896f, 1.7999f, 1.7864f, 1.7760f,
-                 1.7613f, 1.7625f, 1.7560f, 1.7577f, 1.7783f, 1.7671f, 1.7810f, 1.7799f,
-                 1.7201f, 1.7068f, 1.7265f, 1.7091f, 1.7793f, 1.7578f, 1.7502f, 1.7455f,
-                 1.7587f, 1.7500f, 1.7525f, 1.7362f, 1.7616f, 1.7572f, 1.7444f, 1.7430f,
-                 1.7509f, 1.7610f, 1.7634f, 1.7612f, 1.7254f, 1.7135f, 1.7321f, 1.7226f,
-                 1.7664f, 1.7624f, 1.7718f, 1.7664f, 1.7457f, 1.7441f, 1.7569f, 1.7530f};
+            GGML_ASSERT(latents.shape()[channel_dim] == 128);
+            std::vector<int64_t> stats_shape(static_cast<size_t>(latents.dim()), 1);
+            stats_shape[static_cast<size_t>(channel_dim)] = latents.shape()[channel_dim];
+
+            auto mean_tensor = sd::Tensor<float>::from_vector({-0.0676f, -0.0715f, -0.0753f, -0.0745f, 0.0223f, 0.0180f, 0.0142f, 0.0184f,
+                                                               -0.0001f, -0.0063f, -0.0002f, -0.0031f, -0.0272f, -0.0281f, -0.0276f, -0.0290f,
+                                                               -0.0769f, -0.0672f, -0.0902f, -0.0892f, 0.0168f, 0.0152f, 0.0079f, 0.0086f,
+                                                               0.0083f, 0.0015f, 0.0003f, -0.0043f, -0.0439f, -0.0419f, -0.0438f, -0.0431f,
+                                                               -0.0102f, -0.0132f, -0.0066f, -0.0048f, -0.0311f, -0.0306f, -0.0279f, -0.0180f,
+                                                               0.0030f, 0.0015f, 0.0126f, 0.0145f, 0.0347f, 0.0338f, 0.0337f, 0.0283f,
+                                                               0.0020f, 0.0047f, 0.0047f, 0.0050f, 0.0123f, 0.0081f, 0.0081f, 0.0146f,
+                                                               0.0681f, 0.0679f, 0.0767f, 0.0732f, -0.0462f, -0.0474f, -0.0392f, -0.0511f,
+                                                               -0.0528f, -0.0477f, -0.0470f, -0.0517f, -0.0317f, -0.0316f, -0.0345f, -0.0283f,
+                                                               0.0510f, 0.0445f, 0.0578f, 0.0458f, -0.0412f, -0.0458f, -0.0487f, -0.0467f,
+                                                               -0.0088f, -0.0106f, -0.0088f, -0.0046f, -0.0376f, -0.0432f, -0.0436f, -0.0499f,
+                                                               0.0118f, 0.0166f, 0.0203f, 0.0279f, 0.0113f, 0.0129f, 0.0016f, 0.0072f,
+                                                               -0.0118f, -0.0018f, -0.0141f, -0.0054f, -0.0091f, -0.0138f, -0.0145f, -0.0187f,
+                                                               0.0323f, 0.0305f, 0.0259f, 0.0300f, 0.0540f, 0.0614f, 0.0495f, 0.0590f,
+                                                               -0.0511f, -0.0603f, -0.0478f, -0.0524f, -0.0227f, -0.0274f, -0.0154f, -0.0255f,
+                                                               -0.0572f, -0.0565f, -0.0518f, -0.0496f, 0.0116f, 0.0054f, 0.0163f, 0.0104f});
+            mean_tensor.reshape_(stats_shape);
+            auto std_tensor = sd::Tensor<float>::from_vector({1.8029f, 1.7786f, 1.7868f, 1.7837f, 1.7717f, 1.7590f, 1.7610f, 1.7479f,
+                                                              1.7336f, 1.7373f, 1.7340f, 1.7343f, 1.8626f, 1.8527f, 1.8629f, 1.8589f,
+                                                              1.7593f, 1.7526f, 1.7556f, 1.7583f, 1.7363f, 1.7400f, 1.7355f, 1.7394f,
+                                                              1.7342f, 1.7246f, 1.7392f, 1.7304f, 1.7551f, 1.7513f, 1.7559f, 1.7488f,
+                                                              1.8449f, 1.8454f, 1.8550f, 1.8535f, 1.8240f, 1.7813f, 1.7854f, 1.7945f,
+                                                              1.8047f, 1.7876f, 1.7695f, 1.7676f, 1.7782f, 1.7667f, 1.7925f, 1.7848f,
+                                                              1.7579f, 1.7407f, 1.7483f, 1.7368f, 1.7961f, 1.7998f, 1.7920f, 1.7925f,
+                                                              1.7780f, 1.7747f, 1.7727f, 1.7749f, 1.7526f, 1.7447f, 1.7657f, 1.7495f,
+                                                              1.7775f, 1.7720f, 1.7813f, 1.7813f, 1.8162f, 1.8013f, 1.8023f, 1.8033f,
+                                                              1.7527f, 1.7331f, 1.7563f, 1.7482f, 1.7610f, 1.7507f, 1.7681f, 1.7613f,
+                                                              1.7665f, 1.7545f, 1.7828f, 1.7726f, 1.7896f, 1.7999f, 1.7864f, 1.7760f,
+                                                              1.7613f, 1.7625f, 1.7560f, 1.7577f, 1.7783f, 1.7671f, 1.7810f, 1.7799f,
+                                                              1.7201f, 1.7068f, 1.7265f, 1.7091f, 1.7793f, 1.7578f, 1.7502f, 1.7455f,
+                                                              1.7587f, 1.7500f, 1.7525f, 1.7362f, 1.7616f, 1.7572f, 1.7444f, 1.7430f,
+                                                              1.7509f, 1.7610f, 1.7634f, 1.7612f, 1.7254f, 1.7135f, 1.7321f, 1.7226f,
+                                                              1.7664f, 1.7624f, 1.7718f, 1.7664f, 1.7457f, 1.7441f, 1.7569f, 1.7530f});
+            std_tensor.reshape_(stats_shape);
+            return {std::move(mean_tensor), std::move(std_tensor)};
         } else {
             GGML_ABORT("unknown version %d", version);
         }
     }
 
-    ggml_tensor* diffusion_to_vae_latents(ggml_context* work_ctx, ggml_tensor* latents) {
-        ggml_tensor* vae_latents = ggml_dup(work_ctx, latents);
+    sd::Tensor<float> diffusion_to_vae_latents(const sd::Tensor<float>& latents) override {
         if (sd_version_is_flux2(version)) {
-            int channel_dim = 2;
-            std::vector<float> latents_mean_vec;
-            std::vector<float> latents_std_vec;
-            get_latents_mean_std_vec(latents, channel_dim, latents_mean_vec, latents_std_vec);
-
-            float mean;
-            float std_;
-            for (int i = 0; i < latents->ne[3]; i++) {
-                if (channel_dim == 3) {
-                    mean = latents_mean_vec[i];
-                    std_ = latents_std_vec[i];
-                }
-                for (int j = 0; j < latents->ne[2]; j++) {
-                    if (channel_dim == 2) {
-                        mean = latents_mean_vec[j];
-                        std_ = latents_std_vec[j];
-                    }
-                    for (int k = 0; k < latents->ne[1]; k++) {
-                        for (int l = 0; l < latents->ne[0]; l++) {
-                            float value = ggml_ext_tensor_get_f32(latents, l, k, j, i);
-                            value       = value * std_ / scale_factor + mean;
-                            ggml_ext_tensor_set_f32(vae_latents, value, l, k, j, i);
-                        }
-                    }
-                }
-            }
-        } else {
-            ggml_ext_tensor_iter(latents, [&](ggml_tensor* latents, int64_t i0, int64_t i1, int64_t i2, int64_t i3) {
-                float value = ggml_ext_tensor_get_f32(latents, i0, i1, i2, i3);
-                value       = (value / scale_factor) + shift_factor;
-                ggml_ext_tensor_set_f32(vae_latents, value, i0, i1, i2, i3);
-            });
+            int channel_dim                = 2;
+            auto [mean_tensor, std_tensor] = get_latents_mean_std(latents, channel_dim);
+            return (latents * std_tensor) / scale_factor + mean_tensor;
         }
-        return vae_latents;
+        return (latents / scale_factor) + shift_factor;
     }
 
-    ggml_tensor* vae_to_diffuison_latents(ggml_context* work_ctx, ggml_tensor* latents) {
-        ggml_tensor* diffusion_latents = ggml_dup(work_ctx, latents);
+    sd::Tensor<float> vae_to_diffusion_latents(const sd::Tensor<float>& latents) override {
         if (sd_version_is_flux2(version)) {
-            int channel_dim = 2;
-            std::vector<float> latents_mean_vec;
-            std::vector<float> latents_std_vec;
-            get_latents_mean_std_vec(latents, channel_dim, latents_mean_vec, latents_std_vec);
-
-            float mean;
-            float std_;
-            for (int i = 0; i < latents->ne[3]; i++) {
-                if (channel_dim == 3) {
-                    mean = latents_mean_vec[i];
-                    std_ = latents_std_vec[i];
-                }
-                for (int j = 0; j < latents->ne[2]; j++) {
-                    if (channel_dim == 2) {
-                        mean = latents_mean_vec[j];
-                        std_ = latents_std_vec[j];
-                    }
-                    for (int k = 0; k < latents->ne[1]; k++) {
-                        for (int l = 0; l < latents->ne[0]; l++) {
-                            float value = ggml_ext_tensor_get_f32(latents, l, k, j, i);
-                            value       = (value - mean) * scale_factor / std_;
-                            ggml_ext_tensor_set_f32(diffusion_latents, value, l, k, j, i);
-                        }
-                    }
-                }
-            }
-        } else {
-            ggml_ext_tensor_iter(latents, [&](ggml_tensor* latents, int64_t i0, int64_t i1, int64_t i2, int64_t i3) {
-                float value = ggml_ext_tensor_get_f32(latents, i0, i1, i2, i3);
-                value       = (value - shift_factor) * scale_factor;
-                ggml_ext_tensor_set_f32(diffusion_latents, value, i0, i1, i2, i3);
-            });
+            int channel_dim                = 2;
+            auto [mean_tensor, std_tensor] = get_latents_mean_std(latents, channel_dim);
+            return ((latents - mean_tensor) * scale_factor) / std_tensor;
         }
-        return diffusion_latents;
+        return (latents - shift_factor) * scale_factor;
     }
 
     int get_encoder_output_channels(int input_channels) {
@@ -881,29 +799,31 @@ struct AutoEncoderKL : public VAE {
     }
 
     void test() {
-        struct ggml_init_params params;
+        ggml_init_params params;
         params.mem_size   = static_cast<size_t>(10 * 1024 * 1024);  // 10 MB
         params.mem_buffer = nullptr;
         params.no_alloc   = false;
 
-        struct ggml_context* work_ctx = ggml_init(params);
-        GGML_ASSERT(work_ctx != nullptr);
+        ggml_context* ctx = ggml_init(params);
+        GGML_ASSERT(ctx != nullptr);
 
         {
             // CPU, x{1, 3, 64, 64}: Pass
             // CUDA, x{1, 3, 64, 64}: Pass, but sill get wrong result for some image, may be due to interlnal nan
             // CPU, x{2, 3, 64, 64}: Wrong result
             // CUDA, x{2, 3, 64, 64}: Wrong result, and different from CPU result
-            auto x = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, 64, 64, 3, 2);
-            ggml_set_f32(x, 0.5f);
-            print_ggml_tensor(x);
-            struct ggml_tensor* out = nullptr;
+            sd::Tensor<float> x({64, 64, 3, 2});
+            x.fill_(0.5f);
+            print_sd_tensor(x);
+            sd::Tensor<float> out;
 
-            int64_t t0 = ggml_time_ms();
-            _compute(8, x, false, &out, work_ctx);
-            int64_t t1 = ggml_time_ms();
+            int64_t t0   = ggml_time_ms();
+            auto out_opt = _compute(8, x, false);
+            int64_t t1   = ggml_time_ms();
 
-            print_ggml_tensor(out);
+            GGML_ASSERT(!out_opt.empty());
+            out = std::move(out_opt);
+            print_sd_tensor(out);
             LOG_DEBUG("encode test done in %lldms", t1 - t0);
         }
 
@@ -912,16 +832,18 @@ struct AutoEncoderKL : public VAE {
             // CUDA, z{1, 4, 8, 8}: Pass
             // CPU, z{3, 4, 8, 8}: Wrong result
             // CUDA, z{3, 4, 8, 8}: Wrong result, and different from CPU result
-            auto z = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, 8, 8, 4, 1);
-            ggml_set_f32(z, 0.5f);
-            print_ggml_tensor(z);
-            struct ggml_tensor* out = nullptr;
+            sd::Tensor<float> z({8, 8, 4, 1});
+            z.fill_(0.5f);
+            print_sd_tensor(z);
+            sd::Tensor<float> out;
 
-            int64_t t0 = ggml_time_ms();
-            _compute(8, z, true, &out, work_ctx);
-            int64_t t1 = ggml_time_ms();
+            int64_t t0   = ggml_time_ms();
+            auto out_opt = _compute(8, z, true);
+            int64_t t1   = ggml_time_ms();
 
-            print_ggml_tensor(out);
+            GGML_ASSERT(!out_opt.empty());
+            out = std::move(out_opt);
+            print_sd_tensor(out);
             LOG_DEBUG("decode test done in %lldms", t1 - t0);
         }
     };
