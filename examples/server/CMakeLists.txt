@@ -56,7 +56,11 @@ else()
     message(STATUS "Frontend disabled or directory not found: ${FRONTEND_DIR}")
 endif()
 
-add_executable(${TARGET} main.cpp)
+add_executable(${TARGET}
+    ../common/log.cpp
+    ../common/media_io.cpp
+    main.cpp
+)
 
 if(HAVE_FRONTEND_BUILD)
     add_dependencies(${TARGET} ${TARGET}_frontend)
@@ -70,6 +74,14 @@ endif()
 
 install(TARGETS ${TARGET} RUNTIME)
 target_link_libraries(${TARGET} PRIVATE stable-diffusion ${CMAKE_THREAD_LIBS_INIT})
+if(SD_WEBP)
+    target_compile_definitions(${TARGET} PRIVATE SD_USE_WEBP)
+    target_link_libraries(${TARGET} PRIVATE webp libwebpmux)
+endif()
+if(SD_WEBM)
+    target_compile_definitions(${TARGET} PRIVATE SD_USE_WEBM)
+    target_link_libraries(${TARGET} PRIVATE webm)
+endif()
 
 # due to httplib; it contains a pragma for MSVC, but other things need explicit flags
 if(WIN32 AND NOT MSVC)
