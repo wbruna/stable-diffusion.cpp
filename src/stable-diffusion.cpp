@@ -369,7 +369,8 @@ public:
         bool isflux2 = sd_version_is_flux2(tempver);
         bool is_ovis =  (tempver==VERSION_OVIS_IMAGE);
         bool is_anima = sd_version_is_anima(tempver);
-        bool conditioner_is_llm = (is_qwenimg || iszimg || isflux2 || is_ovis || is_anima);
+        bool is_ernie = sd_version_is_ernie_image(tempver);
+        bool conditioner_is_llm = (is_qwenimg || iszimg || isflux2 || is_ovis || is_anima || is_ernie);
 
         //kcpp qol fallback: if a llm was loaded as t5 by mistake
         if(conditioner_is_llm && t5_path_fixed!="")
@@ -460,7 +461,7 @@ public:
             {
                 to_replace = "taesd_3.embd";
             }
-            else if(sd_version_is_flux2(tempver))
+            else if(sd_version_uses_flux2_vae(tempver))
             {
                 to_replace = "taesd_f2.embd";
             }
