@@ -24,6 +24,7 @@ struct TensorStorage {
     int64_t ne[SD_MAX_DIMS] = {1, 1, 1, 1, 1};
     int n_dims              = 0;
 
+    std::string storage_key;
     size_t file_index = 0;
     int index_in_zip  = -1;  // >= means stored in a zip file
     uint64_t offset   = 0;   // offset in file
@@ -118,6 +119,12 @@ struct TensorStorage {
         ss << "]";
         return ss.str();
     }
+};
+
+struct TensorWriteInfo {
+    int64_t ne[SD_MAX_DIMS] = {1, 1, 1, 1, 1};
+    int n_dims              = 0;
+    ggml_tensor* tensor     = nullptr;
 };
 
 typedef std::function<bool(const TensorStorage&, ggml_tensor**)> on_new_tensor_cb_t;
