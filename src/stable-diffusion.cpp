@@ -1631,7 +1631,7 @@ public:
                                                                                            denoiser.get(),
                                                                                            sigmas);
         size_t steps                                = sigmas.size() - 1;
-        bool has_skiplayer                          = slg_scale != 0.0f && !skip_layers.empty();
+        bool has_skiplayer                          = (slg_scale != 0.0f || guidance.slg.uncond) && !skip_layers.empty();
         if (has_skiplayer && !sd_version_is_dit(version)) {
             has_skiplayer = false;
             LOG_WARN("SLG is incompatible with this model type");
@@ -1745,6 +1745,10 @@ public:
                 }
             }
 
+            bool is_skiplayer_step = has_skiplayer &&
+                                     step > (int)(guidance.slg.layer_start * static_cast<int>(sigmas.size())) &&
+                                     step < (int)(guidance.slg.layer_end * static_cast<int>(sigmas.size()));
+
             if (!uncond.empty()) {
                 if (!step_cache.is_step_skipped()) {
                     compute_sample_controls(control_image,
@@ -1753,7 +1757,12 @@ public:
                                             uncond,
                                             &controls);
                 }
-                uncond_out = run_condition(uncond);
+                const std::vector<int>* uncond_skip = nullptr;
+                if (is_skiplayer_step && guidance.slg.uncond) {
+                    LOG_DEBUG("Skipping layers at uncond step %d\n", step);
+                    uncond_skip = &skip_layers;
+                }
+                uncond_out = run_condition(uncond, nullptr, uncond_skip);
                 if (uncond_out.empty()) {
                     return {};
                 }
@@ -1765,10 +1774,7 @@ public:
                     return {};
                 }
             }
-            bool is_skiplayer_step = has_skiplayer &&
-                                     step > (int)(guidance.slg.layer_start * static_cast<int>(sigmas.size())) &&
-                                     step < (int)(guidance.slg.layer_end * static_cast<int>(sigmas.size()));
-            if (is_skiplayer_step) {
+            if (is_skiplayer_step && slg_scale != 0.0f) {
                 LOG_DEBUG("Skipping layers at step %d\n", step);
                 if (!step_cache.is_step_skipped()) {
                     skip_cond_out = run_condition(cond,
@@ -2719,6 +2725,19 @@ struct SamplePlan {
                                                                      sd_ctx->sd->get_image_seq_len(request->height, request->width),
                                                                      scheduler,
                                                                      sd_ctx->sd->version);
+
+            {
+                std::ostringstream oss;
+                oss << std::setprecision(6);
+                oss << "| " << sd_scheduler_name(sample_params->scheduler) << " | " << sigmas[0] << " |";
+                for (size_t i = 1; i < sigmas.size(); ++i) {
+                    oss << sigmas[i] << " |";
+                    //if (i != sigmas.size() - 1) {
+                    //    oss << ",";
+                    //}
+                }
+                LOG_DEBUG("Sigma schedule: \n%s", oss.str().c_str());
+            }
         }
 
         eta = resolve_eta(sd_ctx, eta, sample_method);

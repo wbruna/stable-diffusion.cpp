@@ -218,6 +218,7 @@ typedef struct {
     float layer_start;
     float layer_end;
     float scale;
+    bool uncond;
 } sd_slg_params_t;
 
 typedef struct {

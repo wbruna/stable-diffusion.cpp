@@ -932,6 +932,18 @@ ArgOptions SDGenerationParams::get_options() {
          false,
          &embed_image_metadata},
         {"",
+         "--slg-uncond",
+         "use CFG's forward pass for skip layer guidance (SLG) instead of a separate pass, only for DiT models (recommended to keep slg-scale at 0 if enabled)",
+         true,
+         &sample_params.guidance.slg.uncond
+        },
+        {"",
+         "--high-noise-slg-uncond",
+         "(high noise) use CFG's forward pass for skip layer guidance (SLG) instead of a separate pass, only for DiT models (recommended to keep slg-scale at 0 if enabled)",
+         true,
+         &high_noise_sample_params.guidance.slg.uncond
+        },
+        {"",
          "--vae-tiling",
          "process vae in tiles to reduce memory usage",
          true,
@@ -1543,6 +1555,9 @@ bool SDGenerationParams::from_json_str(
                     target_params.guidance.slg.layer_end = slg_json["layer_end"];
                 }
                 if (slg_json.contains("scale") && slg_json["scale"].is_number()) {
+                    target_params.guidance.slg.scale = slg_json["scale"];
+                }
+                if (slg_json.contains("uncond") && slg_json["scale"].is_number()) {
                     target_params.guidance.slg.scale = slg_json["scale"];
                 }
             }
