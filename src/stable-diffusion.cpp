@@ -1644,6 +1644,14 @@ public:
         sd::Tensor<float> denoised   = x_t;
         SamplePreviewContext preview = prepare_sample_preview_context();
 
+        sd::Tensor<float> apg_momentum_buffer;
+        std::vector<float> apg_cfg_norm;
+        bool apg_enabled = false;
+        if (guidance.apg.eta != 1.f || guidance.apg.momentum != 0.f || guidance.apg.norm_threshold != 0.f) {
+            LOG_INFO("APG enabled: eta=%g, momentum=%g, norm_threshold=%g", guidance.apg.eta, guidance.apg.momentum, guidance.apg.norm_threshold);
+            apg_enabled = true;
+        }
+
         auto denoise = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::Tensor<float> {
             if (step == 1 || step == -1) {
                 pretty_progress(0, (int)steps, 0);
@@ -1788,16 +1796,87 @@ public:
 
             GGML_ASSERT(!cond_out.empty());
             sd::Tensor<float> latent_result = cond_out;
-            if (!uncond_out.empty()) {
-                if (!img_cond_out.empty()) {
-                    latent_result = uncond_out +
-                                    img_cfg_scale * (img_cond_out - uncond_out) +
-                                    cfg_scale * (cond_out - img_cond_out);
+
+            if (!uncond_out.empty() || !img_cond_out.empty()) {
+
+                sd::Tensor<float> delta;
+                if (img_cond_out.empty()) {
+                    // classic CFG (img_cfg_scale == cfg_scale != 1)
+                    delta = cond_out - uncond_out;
+                } else if (cfg_scale == 1.f) {
+                    // Weird guidance (important: use img_cfg_scale instead of cfg_scale in the final formula)
+                    delta = img_cond_out - uncond_out;
+                } else if (uncond_out.empty()) {
+                    // pure img CFG (img_cfg_scale == 1, cfg_scale !=1)
+                    delta = cond_out - img_cond_out;
                 } else {
-                    latent_result = uncond_out + cfg_scale * (cond_out - uncond_out);
+                    // 2-conditioning CFG (img_cfg_scale != cfg_scale != 1)
+                    delta = cond_out + (uncond_out * (1.f - img_cfg_scale) +
+                            img_cond_out * (img_cfg_scale - cfg_scale)) / (cfg_scale - 1.f);
                 }
-            } else if (!img_cond_out.empty()) {
-                latent_result = img_cond_out + cfg_scale * (cond_out - img_cond_out);
+
+                // APG: https://arxiv.org/pdf/2410.02416
+
+                if (guidance.apg.momentum != 0.f) {
+                    if (!apg_momentum_buffer.empty()) {
+                        delta += guidance.apg.momentum * apg_momentum_buffer;
+                    }
+                    apg_momentum_buffer = delta;
+                }
+
+                float diff_norm = 0.f;
+                if (apg_enabled) {
+                    float cfg_norm = 0.f;
+                    for (int64_t i = 0; i < delta.numel(); ++i) {
+                        cfg_norm += delta[i] * delta[i];
+                    }
+                    cfg_norm = sqrtf(cfg_norm);
+                    apg_cfg_norm.push_back(cfg_norm);
+                    if (guidance.apg.norm_threshold > 0) {
+                        diff_norm = cfg_norm;
+                    }
+                }
+
+                float apg_scale_factor = 1.f;
+                if (diff_norm > 0) {
+                    if (guidance.apg.norm_threshold_smoothing <= 0) {
+                        apg_scale_factor = std::min(1.0f, guidance.apg.norm_threshold / diff_norm);
+                    } else {
+                        // Experimental: smooth saturate
+                        float x = guidance.apg.norm_threshold / diff_norm;
+                        apg_scale_factor = x / std::pow(1 + std::pow(x, 1.0 / guidance.apg.norm_threshold_smoothing),
+                                guidance.apg.norm_threshold_smoothing);
+                    }
+                    delta *= apg_scale_factor;
+                }
+
+                if (guidance.apg.eta != 1.0f) {
+                    float cond_norm_sq = 0.f;
+                    float dot          = 0.f;
+                    for (int64_t i = 0; i < delta.numel(); ++i) {
+                        cond_norm_sq += cond_out[i] * cond_out[i];
+                        dot          += cond_out[i] * delta[i];
+                    }
+                    // pre-normalize (avoids one square root and ne_elements extra divs)
+                    dot /= cond_norm_sq;
+
+                    for (int64_t i = 0; i < delta.numel(); ++i) {
+                        float apg_parallel   = dot * cond_out[i];
+                        float apg_orthogonal = delta[i] - apg_parallel;
+                        // tweak deltas
+                        delta[i] = apg_orthogonal + guidance.apg.eta * apg_parallel;
+                    }
+                }
+
+                if (img_cond_out.empty()) {
+                    latent_result += (cfg_scale - 1.f) * delta;
+                } else if (cfg_scale == 1.f) {
+                    latent_result += (img_cfg_scale - 1.f) * delta;
+                } else if (uncond_out.empty()) {
+                    latent_result = img_cond_out + cfg_scale * delta;
+                } else {
+                    latent_result += (cfg_scale - 1.f) * delta;
+                }
             }
 
             if (is_skiplayer_step && !skip_cond_out.empty()) {
@@ -1828,6 +1907,12 @@ public:
                 work_diffusion_model->free_compute_buffer();
             }
             return {};
+        }
+        if (!apg_cfg_norm.empty()) {
+            std::sort(apg_cfg_norm.begin(), apg_cfg_norm.end());
+            size_t mid = apg_cfg_norm.size() / 2;
+            float median = (mid % 2 == 0 ? (apg_cfg_norm[mid - 1] + apg_cfg_norm[mid]) / 2.0f : apg_cfg_norm[mid]);
+            LOG_DEBUG("CFG Delta norm: [%g, %g], median=%g", apg_cfg_norm[0], apg_cfg_norm[apg_cfg_norm.size()-1], median);
         }
 
         auto x0 = std::move(x0_opt);
@@ -2250,6 +2335,9 @@ void sd_sample_params_init(sd_sample_params_t* sample_params) {
     sample_params->guidance.txt_cfg            = 7.0f;
     sample_params->guidance.img_cfg            = INFINITY;
     sample_params->guidance.distilled_guidance = 3.5f;
+    sample_params->guidance.apg.eta            = INFINITY;
+    sample_params->guidance.apg.momentum       = INFINITY;
+    sample_params->guidance.apg.norm_threshold = INFINITY;
     sample_params->guidance.slg.layer_count    = 0;
     sample_params->guidance.slg.layer_start    = 0.01f;
     sample_params->guidance.slg.layer_end      = 0.2f;
@@ -2639,6 +2727,20 @@ struct GenerationRequest {
                 LOG_WARN("%scfg value out of expected range may produce unexpected results", prefix);
             }
         }
+        if (!std::isfinite(guidance->apg.eta)) {
+            guidance->apg.eta = 1.f;
+        }
+        if (!std::isfinite(guidance->apg.momentum)) {
+            guidance->apg.momentum = 0.f;
+        }
+        if (!std::isfinite(guidance->apg.norm_threshold)) {
+            guidance->apg.norm_threshold = 0.f;
+        }
+        guidance->apg.norm_threshold = std::max(0.f, guidance->apg.norm_threshold);
+        if (!std::isfinite(guidance->apg.norm_threshold_smoothing)) {
+            guidance->apg.norm_threshold_smoothing = 0.f;
+        }
+        guidance->apg.norm_threshold_smoothing = std::max(0.f, guidance->apg.norm_threshold_smoothing);
     }
 
     void resolve(sd_ctx_t* sd_ctx) {

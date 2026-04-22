@@ -842,6 +842,22 @@ ArgOptions SDGenerationParams::get_options() {
          "distilled guidance scale for models with guidance input (default: 3.5)",
          &sample_params.guidance.distilled_guidance},
         {"",
+         "--apg-eta",
+         "parallel projected guidance scale for APG (default: 1.0, recommended: between 0 and 1)",
+         &sample_params.guidance.apg.eta},
+        {"",
+         "--apg-momentum",
+         "momentum for guidance adjustments with APG (default: 0, recommended: around -0.5 (negative))",
+         &sample_params.guidance.apg.momentum},
+        {"",
+         "--apg-nt",
+         "APG norm threshold: Upper bound allowed for the amplitude (L2 norm) of guidance updates (default: 0 = disabled, recommended: 4-15)",
+         &sample_params.guidance.apg.norm_threshold},
+        {"",
+         "--apg-nt-smoothing",
+         "Norm threshold smoothing for APG, smoothly decrease the amplitude of the guidance update if it gets too close to the norm threshold (experimental; default: 0 = disabled)",
+         &sample_params.guidance.apg.norm_threshold_smoothing},
+        {"",
          "--slg-scale",
          "skip layer guidance (SLG) scale, only for DiT models: (default: 0). 0 means disabled, a value of 2.5 is nice for sd3.5 medium",
          &sample_params.guidance.slg.scale},
@@ -1543,6 +1559,21 @@ bool SDGenerationParams::from_json_str(
             if (guidance_json.contains("distilled_guidance") && guidance_json["distilled_guidance"].is_number()) {
                 target_params.guidance.distilled_guidance = guidance_json["distilled_guidance"];
             }
+            if (guidance_json.contains("apg") && guidance_json["apg"].is_object()) {
+                const json& apg_json = guidance_json["apg"];
+                if (apg_json.contains("eta") && apg_json["eta"].is_number()) {
+                    target_params.guidance.apg.eta = apg_json["eta"];
+                }
+                if (apg_json.contains("momentum") && apg_json["momentum"].is_number()) {
+                    target_params.guidance.apg.momentum = apg_json["momentum"];
+                }
+                if (apg_json.contains("norm_threshold") && apg_json["norm_threshold"].is_number()) {
+                    target_params.guidance.apg.norm_threshold = apg_json["norm_threshold"];
+                }
+                if (apg_json.contains("norm_threshold_smoothing") && apg_json["norm_threshold_smoothing"].is_number()) {
+                    target_params.guidance.apg.norm_threshold_smoothing = apg_json["norm_threshold_smoothing"];
+                }
+            }
             if (guidance_json.contains("slg") && guidance_json["slg"].is_object()) {
                 const json& slg_json = guidance_json["slg"];
                 if (slg_json.contains("layers") && slg_json["layers"].is_array()) {
@@ -2120,6 +2151,8 @@ std::string version_string() {
 }
 
 std::string get_image_params(const SDContextParams& ctx_params, const SDGenerationParams& gen_params, int64_t seed) {
+    sd_img_gen_params_t defaults;
+    sd_img_gen_params_init(&defaults);
     std::string parameter_string;
     if (gen_params.prompt_with_lora.size() != 0) {
         parameter_string += gen_params.prompt_with_lora + "\n";
@@ -2131,6 +2164,22 @@ std::string get_image_params(const SDContextParams& ctx_params, const SDGenerati
     }
     parameter_string += "Steps: " + std::to_string(gen_params.sample_params.sample_steps) + ", ";
     parameter_string += "CFG scale: " + std::to_string(gen_params.sample_params.guidance.txt_cfg) + ", ";
+    {
+        auto & apg = gen_params.sample_params.guidance.apg;
+        auto & def_apg = defaults.sample_params.guidance.apg;
+        if (apg.eta != def_apg.eta) {
+            parameter_string += "APG eta: " + std::to_string(apg.eta) + ", ";
+        }
+        if (apg.momentum != def_apg.momentum) {
+            parameter_string += "APG momentum: " + std::to_string(apg.momentum) + ", ";
+        }
+        if (apg.norm_threshold != def_apg.norm_threshold) {
+            parameter_string += "APG norm threshold: " + std::to_string(apg.norm_threshold) + ", ";
+            if (apg.norm_threshold > 0 && apg.norm_threshold_smoothing != def_apg.norm_threshold_smoothing && apg.norm_threshold_smoothing > 0) {
+                parameter_string += "APG norm threshold smoothing: " + std::to_string(apg.norm_threshold_smoothing) + ", ";
+            }
+        }
+    }
     if (gen_params.sample_params.guidance.slg.scale != 0 && gen_params.skip_layers.size() != 0) {
         parameter_string += "SLG scale: " + std::to_string(gen_params.sample_params.guidance.txt_cfg) + ", ";
         parameter_string += "Skip layers: [";

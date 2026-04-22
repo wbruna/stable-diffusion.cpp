@@ -213,6 +213,13 @@ typedef struct {
 } sd_image_t;
 
 typedef struct {
+    float eta;
+    float momentum;
+    float norm_threshold;
+    float norm_threshold_smoothing;
+} sd_apg_params_t;
+
+typedef struct {
     int* layers;
     size_t layer_count;
     float layer_start;
@@ -226,6 +233,7 @@ typedef struct {
     float img_cfg;
     float distilled_guidance;
     sd_slg_params_t slg;
+    sd_apg_params_t apg;
 } sd_guidance_params_t;
 
 typedef struct {
