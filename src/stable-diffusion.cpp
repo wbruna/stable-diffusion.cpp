@@ -1811,8 +1811,8 @@ public:
                     delta = cond_out - img_cond_out;
                 } else {
                     // 2-conditioning CFG (img_cfg_scale != cfg_scale != 1)
-                    delta = cond_out + (uncond_out * (1.f - img_cfg_scale) +
-                            img_cond_out * (img_cfg_scale - cfg_scale)) / (cfg_scale - 1.f);
+                    // apply APG to the outer direction
+                    delta = cond_out - img_cond_out;
                 }
 
                 // APG: https://arxiv.org/pdf/2410.02416
@@ -1869,13 +1869,13 @@ public:
                 }
 
                 if (img_cond_out.empty()) {
-                    latent_result += (cfg_scale - 1.f) * delta;
+                    latent_result = uncond_out + cfg_scale * delta;
                 } else if (cfg_scale == 1.f) {
                     latent_result += (img_cfg_scale - 1.f) * delta;
                 } else if (uncond_out.empty()) {
                     latent_result = img_cond_out + cfg_scale * delta;
                 } else {
-                    latent_result += (cfg_scale - 1.f) * delta;
+                    latent_result = uncond_out + img_cfg_scale * (img_cond_out - uncond_out) + cfg_scale * delta;
                 }
             }
 
