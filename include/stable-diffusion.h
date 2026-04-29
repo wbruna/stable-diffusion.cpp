@@ -312,6 +312,7 @@ typedef struct {
     int target_height;
     int steps;
     float denoising_strength;
+    bool skip_base_low_noise;
     int upscale_tile_size;
 } sd_hires_params_t;
 

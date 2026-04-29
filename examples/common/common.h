@@ -200,6 +200,7 @@ struct SDGenerationParams {
     int hires_steps                = 0;
     float hires_denoising_strength = 0.7f;
     int hires_upscale_tile_size    = 128;
+    bool hires_skip_base_low_noise = false;
 
     std::map<std::string, float> lora_map;
     std::map<std::string, float> high_noise_lora_map;

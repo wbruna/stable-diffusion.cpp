@@ -2582,6 +2582,7 @@ struct GenerationRequest {
     float strength                           = 1.f;
     float control_strength                   = 0.f;
     float eta                                = 0.f;
+    bool hires_skip_last_gen_steps           = 0;
     bool increase_ref_index                  = false;
     bool auto_resize_ref_image               = false;
     sd_guidance_params_t guidance            = {};
@@ -2972,6 +2973,24 @@ static std::optional<ImageGenerationLatents> prepare_image_generation_latents(sd
         }
 
         init_image_tensor = sd_image_to_tensor(sd_img_gen_params->init_image, request->width, request->height);
+    }
+    if (request->hires.skip_base_low_noise) {
+        // skip the steps that will be performed by the hires pass
+        size_t t_enc = static_cast<size_t>(plan->sample_steps * request->hires.denoising_strength);
+        if (t_enc == static_cast<size_t>(plan->sample_steps)) {
+            t_enc--;
+        }
+        if (t_enc > 0) {
+            t_enc--; // leave an overlap
+        }
+        if (t_enc > 0) {
+            LOG_INFO("skipping last %zu steps for later hires", t_enc);
+            std::vector<float> sigma_sched;
+            sigma_sched.assign(plan->sigmas.begin(), plan->sigmas.end() - t_enc - 1);
+            sigma_sched.push_back(plan->sigmas.back());
+            plan->sigmas       = std::move(sigma_sched);
+            plan->sample_steps = static_cast<int>(plan->sigmas.size() - 1);
+        }
     }
 
     if (sd_img_gen_params->mask_image.data != nullptr) {

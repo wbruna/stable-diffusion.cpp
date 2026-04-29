@@ -988,6 +988,11 @@ ArgOptions SDGenerationParams::get_options() {
          "enable highres fix",
          true,
          &hires_enabled},
+        {"",
+         "--hires-skip-base-low-noise",
+         "skip low-noise steps from base gen when using hires",
+         true,
+         &hires_skip_base_low_noise},
     };
 
     auto on_seed_arg = [&](int argc, const char** argv, int index) {
@@ -2132,6 +2137,7 @@ sd_img_gen_params_t SDGenerationParams::to_sd_img_gen_params_t() {
     params.hires.target_height      = hires_height;
     params.hires.steps              = hires_steps;
     params.hires.denoising_strength = hires_denoising_strength;
+    params.hires.skip_base_low_noise= hires_skip_base_low_noise;
     params.hires.upscale_tile_size  = hires_upscale_tile_size;
     return params;
 }
