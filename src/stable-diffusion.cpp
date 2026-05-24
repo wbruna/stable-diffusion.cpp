@@ -568,6 +568,11 @@ public:
                                             ? (ggml_type)sd_ctx_params->wtype
                                             : GGML_TYPE_COUNT;
         std::string tensor_type_rules = SAFE_STR(sd_ctx_params->tensor_type_rules);
+        //kcpp: patch hidream to fix broken images on vulkan https://github.com/leejet/stable-diffusion.cpp/issues/1496
+        if(version == VERSION_HIDREAM_O1 && tensor_type_rules.size()==0)
+        {
+            tensor_type_rules = "^model.language_model.layers.[0-9]+.mlp.down_proj.weight=bf16";
+        }
         if (wtype != GGML_TYPE_COUNT || tensor_type_rules.size() > 0) {
             model_loader.set_wtype_override(wtype, tensor_type_rules);
         }
@@ -5632,6 +5637,8 @@ namespace kcpp_sd {
         res.is_sdxs = (loadedsdver == SDVersion::VERSION_SDXS_512_DS || loadedsdver == SDVersion::VERSION_SDXS_09);
         res.is_sd1 = (loadedsdver == SDVersion::VERSION_SD1);
         res.is_sd2 = (loadedsdver == SDVersion::VERSION_SD2);
+        res.is_sdxl = sd_version_is_sdxl((SDVersion)loadedsdver);
+        res.vae_scale_factor = ctx->sd->get_vae_scale_factor();
         res.spatial_multiple = get_spatial_multiple(ctx);
         return res;
     }

@@ -15,8 +15,10 @@ namespace kcpp_sd {
         bool is_sd1;
         bool is_sd2;
         bool is_sdxs;
+        bool is_sdxl;
         bool is_wan;
         bool is_zimage;
+        int vae_scale_factor;
         int spatial_multiple;
     };
 
