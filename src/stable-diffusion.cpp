@@ -5680,9 +5680,9 @@ namespace kcpp_sd {
 
     bool loaded_model_is_chroma(sd_ctx_t* ctx) {
         if (ctx != nullptr && ctx->sd != nullptr) {
-            auto maybe_flux = std::dynamic_pointer_cast<FluxModel>(ctx->sd->diffusion_model);
+            auto maybe_flux = std::dynamic_pointer_cast<Flux::FluxRunner>(ctx->sd->diffusion_model);
             if (maybe_flux != nullptr) {
-                return maybe_flux->flux.flux_params.is_chroma;
+                return maybe_flux->flux_params.is_chroma;
             }
         }
         return false;
