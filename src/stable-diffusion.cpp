@@ -277,13 +277,15 @@ public:
         }
         max_vram = sd::ggml_graph_cut::resolve_max_vram_gib(max_vram, backend_for(SDBackendModule::DIFFUSION));
 
-        std::string clip_vision_fixed = SAFE_STR(sd_ctx_params->clip_vision_path);
-        std::string clipg_path_fixed  = SAFE_STR(sd_ctx_params->clip_g_path);
-        std::string clipl_path_fixed  = SAFE_STR(sd_ctx_params->clip_l_path);
-        std::string llm_path_fixed    = SAFE_STR(sd_ctx_params->llm_path);
+        std::string clip_vision_fixed     = SAFE_STR(sd_ctx_params->clip_vision_path);
+        std::string clipg_path_fixed      = SAFE_STR(sd_ctx_params->clip_g_path);
+        std::string clipl_path_fixed      = SAFE_STR(sd_ctx_params->clip_l_path);
+        std::string llm_path_fixed        = SAFE_STR(sd_ctx_params->llm_path);
         std::string llm_vision_path_fixed = SAFE_STR(sd_ctx_params->llm_vision_path);
-        std::string t5_path_fixed     = SAFE_STR(sd_ctx_params->t5xxl_path);
-        std::string taesd_path_fixed  = SAFE_STR(sd_ctx_params->taesd_path);
+        std::string t5_path_fixed         = SAFE_STR(sd_ctx_params->t5xxl_path);
+        std::string taesd_path_fixed      = SAFE_STR(sd_ctx_params->taesd_path);
+        std::string embed_connector_fixed = SAFE_STR(sd_ctx_params->embeddings_connectors_path);
+        std::string vae_path_fixed        = SAFE_STR(sd_ctx_params->vae_path);
 
         ModelLoader model_loader;
 
@@ -353,7 +355,8 @@ public:
         bool is_ernie = sd_version_is_ernie_image(tempver);
         bool is_longcat = sd_version_is_longcat(tempver);
         bool is_lens = sd_version_is_lens(tempver);
-        bool conditioner_is_llm = (is_qwenimg || iszimg || isflux2 || is_ovis || is_anima || is_ernie || is_longcat || is_lens);
+        bool is_ltx = sd_version_is_ltxav(tempver);
+        bool conditioner_is_llm = (is_qwenimg || iszimg || isflux2 || is_ovis || is_anima || is_ernie || is_longcat || is_lens || is_ltx);
 
         //kcpp qol fallback: if a llm was loaded as t5 by mistake
         if(conditioner_is_llm && t5_path_fixed!="")
@@ -366,7 +369,7 @@ public:
             else if(clipl_path_fixed!="" && clipg_path_fixed=="")
             {
                 //very tricky case. see if we can tell if clipl is an mmproj, if so move to right place
-                if(toLowerCase(clipl_path_fixed).find("mmproj") != std::string::npos)
+                if(toLowerCase(clipl_path_fixed).find("mmproj") != std::string::npos || is_ltx)
                 {
                     clipg_path_fixed = clipl_path_fixed;
                     clipl_path_fixed = t5_path_fixed;
@@ -407,6 +410,11 @@ public:
             else if(is_qwenimg && llm_vision_path_fixed=="")
             {
                 llm_vision_path_fixed = clipg_path_fixed;
+                clipg_path_fixed = "";
+            }
+            else if(is_ltx)
+            {
+                embed_connector_fixed = clipg_path_fixed;
                 clipg_path_fixed = "";
             }
         }
@@ -476,13 +484,33 @@ public:
             sd_ctx_params->photo_maker_path = "";
         }
 
-        sd_ctx_params->clip_g_path      = clipg_path_fixed.c_str();
-        sd_ctx_params->clip_l_path      = clipl_path_fixed.c_str();
-        sd_ctx_params->clip_vision_path = clip_vision_fixed.c_str();
-        sd_ctx_params->llm_path         = llm_path_fixed.c_str();
-        sd_ctx_params->llm_vision_path  = llm_vision_path_fixed.c_str();
-        sd_ctx_params->t5xxl_path       = t5_path_fixed.c_str();
-        sd_ctx_params->taesd_path       = taesd_path_fixed.c_str();
+        //for models with TAE suppport, if vae is set, tae is off, and it looks like a tae, swap to tae
+        if(taesd_path_fixed=="" && vae_path_fixed!="" && toLowerCase(vae_path_fixed).rfind("tae")!=std::string::npos)
+        {
+            try {
+                const uintmax_t tae_size_limit = 64 * 1024 * 1024; //if its less than 64mb, it might be a TAE
+                // Get the file size in bytes cross-platform
+                uintmax_t size = std::filesystem::file_size(vae_path_fixed);
+                if (size > 0 && size < tae_size_limit) {
+                    printf("\nVAE appears to be a TAE, loading as TAE instead!\n");
+                    taesd_path_fixed = vae_path_fixed;
+                    vae_path_fixed = "";
+                }
+            }
+            catch (const std::filesystem::filesystem_error& e) {
+                std::printf("Error accessing file: %s\n", e.what());
+            }
+        }
+
+        sd_ctx_params->clip_g_path                = clipg_path_fixed.c_str();
+        sd_ctx_params->clip_l_path                = clipl_path_fixed.c_str();
+        sd_ctx_params->clip_vision_path           = clip_vision_fixed.c_str();
+        sd_ctx_params->llm_path                   = llm_path_fixed.c_str();
+        sd_ctx_params->llm_vision_path            = llm_vision_path_fixed.c_str();
+        sd_ctx_params->t5xxl_path                 = t5_path_fixed.c_str();
+        sd_ctx_params->taesd_path                 = taesd_path_fixed.c_str();
+        sd_ctx_params->embeddings_connectors_path = embed_connector_fixed.c_str();
+        sd_ctx_params->vae_path                   = vae_path_fixed.c_str();
         //debug print
         // printf("\n\nclip_g: %s\nclip_l: %s\nclip_vision: %s\nllm: %s\nllm_vision: %s\nt5xxl: %s\ntaesd: %s\n",
         // sd_ctx_params->clip_g_path, sd_ctx_params->clip_l_path, sd_ctx_params->clip_vision_path,
@@ -5707,6 +5735,7 @@ namespace kcpp_sd {
         res.is_sd1 = (loadedsdver == SDVersion::VERSION_SD1);
         res.is_sd2 = (loadedsdver == SDVersion::VERSION_SD2);
         res.is_sdxl = sd_version_is_sdxl((SDVersion)loadedsdver);
+        res.is_ltx = sd_version_is_ltxav((SDVersion)loadedsdver);
         res.vae_scale_factor = ctx->sd->get_vae_scale_factor();
         res.spatial_multiple = get_spatial_multiple(ctx);
         return res;
