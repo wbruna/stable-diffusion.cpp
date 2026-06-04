@@ -10,6 +10,7 @@ on:
   push:
     branches:
       - master
+      - sd_testbuild
       - ci
     paths:
       [
@@ -849,11 +850,11 @@ jobs:
       - ubuntu-latest-cmake
       - ubuntu-latest-cmake-vulkan
       - ubuntu-latest-rocm
-      - build-and-push-docker-images
-      - macOS-latest-cmake
-      - windows-latest-cmake
-      - windows-latest-cmake-hip
-      - windows-latest-rocm
+      #- build-and-push-docker-images
+      #- macOS-latest-cmake
+      #- windows-latest-cmake
+      #- windows-latest-cmake-hip
+      #- windows-latest-rocm
 
     steps:
       - name: Clone
