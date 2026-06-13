@@ -575,15 +575,6 @@ public:
                     }
                 }
                 if (is_chroma) {
-                    if ((sd_ctx_params->flash_attn || sd_ctx_params->diffusion_flash_attn) && sd_ctx_params->chroma_use_dit_mask) {
-                        LOG_WARN(
-                            "!!!It looks like you are using Chroma with flash attention. "
-                            "This is currently unsupported. "
-                            "If you find that the generated images are broken, "
-                            "try either disabling flash attention or specifying "
-                            "--chroma-disable-dit-mask as a workaround.");
-                    }
-
                     cond_stage_model = std::make_shared<T5CLIPEmbedder>(backend_for(SDBackendModule::TE),
                                                                         params_backend_for(SDBackendModule::TE),
                                                                         tensor_storage_map,
@@ -5569,4 +5560,19 @@ SD_API bool generate_video(sd_ctx_t* sd_ctx,
         free_sd_audio(generated_audio);
     }
     return true;
+}
+
+SD_API void free_sd_images(sd_image_t* result_images, int num_images) {
+    if (result_images == nullptr) {
+        return;
+    }
+
+    for (int i = 0; i < num_images; ++i) {
+        if (result_images[i].data != nullptr) {
+            free(result_images[i].data);
+            result_images[i].data = nullptr;
+        }
+    }
+
+    free(result_images);
 }
