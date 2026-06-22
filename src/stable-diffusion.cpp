@@ -588,7 +588,7 @@ public:
             {
                 to_replace = "taesd_xl.embd";
             }
-            else if(sd_version_is_flux(tempver)||sd_version_is_z_image(tempver)||tempver == VERSION_OVIS_IMAGE||is_longcat||is_boogu)
+            else if(sd_version_uses_flux_vae(tempver))
             {
                 to_replace = "taesd_f.embd";
             }
