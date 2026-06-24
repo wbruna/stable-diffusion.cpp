@@ -496,7 +496,8 @@ public:
         bool is_ltx = sd_version_is_ltxav(tempver);
         bool is_ideogram = sd_version_is_ideogram4(tempver);
         bool is_boogu = sd_version_is_boogu_image(tempver);
-        bool conditioner_is_llm = (is_qwenimg || iszimg || isflux2 || is_ovis || is_anima || is_ernie || is_longcat || is_lens || is_ltx || is_ideogram || is_boogu);
+        bool is_krea2 = sd_version_is_krea2(tempver);
+        bool conditioner_is_llm = (is_qwenimg || iszimg || isflux2 || is_ovis || is_anima || is_ernie || is_longcat || is_lens || is_ltx || is_ideogram || is_boogu || is_krea2);
         bool has_llm_vision = (is_qwenimg || is_longcat || is_boogu);
 
         //kcpp qol fallback: if a llm was loaded as t5 by mistake
@@ -602,7 +603,7 @@ public:
             {
                 to_replace = "taesd_f2.embd";
             }
-            else if(is_wan21||is_qwenimg||sd_version_is_anima(tempver))
+            else if(is_wan21||is_qwenimg||is_anima||is_krea2)
             {
                 to_replace = "taesd_w21.embd";
             }
