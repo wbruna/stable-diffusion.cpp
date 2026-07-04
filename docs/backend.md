@@ -51,6 +51,97 @@ Module names are case-insensitive. Hyphens and underscores in module names are i
 sd-cli -m model.safetensors -p "a cat" --backend all=cuda0,te=cpu
 ```
 
+## Multiple devices per module (layer split)
+
+A `--backend` module assignment can list several devices separated by `&`:
+
+```shell
+sd-cli -m model.safetensors -p "a cat" --backend "diffusion=cuda0&cuda1"
+```
+
+The module's transformer blocks are then distributed across the listed devices
+in contiguous ranges sized proportionally to each device's free memory (minus a
+compute-buffer headroom of about 2 GiB per device), and the
+module's graphs are executed with a `ggml_backend_sched` that runs each block
+on the device holding its weights, copying the residual stream at the range
+boundaries. The first device in the list is the module's main device: it also
+holds the non-block tensors (embeddings, final norms, small sub-runners such as
+CLIP models or projectors) and the graph inputs/outputs.
+
+Layer split is supported for the `diffusion` and `te` modules. For `te` it
+applies to the dominant text encoder (`t5xxl` or the LLM); other modules accept
+only a single device. If the module has no recognizable transformer blocks, the
+assignment falls back to the first listed device.
+
+`--params-backend` accepts no device lists. If the module has no explicit
+params assignment, each block range's parameters are loaded directly to (and,
+with `--params-backend diffusion=disk`, released directly from) its own device;
+an explicit assignment such as `te=cpu` keeps the parameters on that backend
+and stages each range to its device on demand.
+
+Layer split cannot be combined with `--max-vram` graph-cut segmentation or
+`--stream-layers` for the split module; those are single-device mechanisms and
+are disabled for it.
+
+Use `--list-devices` to see the device names available on the system.
+
+### Row split (`--split-mode row`)
+
+`--split-mode` selects how a multi-device module distributes its weights:
+`layer` (the default, described above) or `row`. It accepts a single mode or
+per-module assignments:
+
+```shell
+sd-cli -m model.safetensors -p "a cat" --backend "diffusion=cuda0&cuda1" --split-mode row
+sd-cli -m model.safetensors -p "a cat" --backend "diffusion=cuda0&cuda1,te=cuda0&cuda1" --split-mode diffusion=row,te=layer
+```
+
+In row mode the module keeps executing on its main (first listed) device, but
+its transformer-block matmul weights are allocated in the backend's row-split
+buffer type, which slices each weight's rows across the listed devices in
+proportion to free memory and runs those matmuls on all devices in parallel.
+Compared to a layer split this uses all GPUs within every layer (instead of
+sequentially device by device) at the cost of a cross-device reduction per
+matmul - usually the faster option when the devices have fast interconnect.
+
+Row split requires backend support for split buffers and is currently
+available on CUDA only; on other backends (or when the listed devices belong
+to different backend registries) the module falls back to a layer split.
+Embeddings, normalization weights, biases and other non-block tensors stay in
+regular buffers on the main device.
+
+Direct ("immediately") LoRA application cannot patch row-split tensors; with
+`--split-mode row` the automatic LoRA mode selects runtime application, and an
+explicit `--lora-apply-mode immediately` skips the split tensors with a
+warning.
+
+## Automatic placement (`--auto-fit`)
+
+`--auto-fit` derives the `diffusion` / `te` / `vae` placements from the model
+metadata and the per-device memory budgets, then feeds them into the same
+backend assignment mechanism described above (the chosen specs are printed).
+`--backend` and `--params-backend` are ignored while auto-fit is enabled.
+
+```shell
+sd-cli -m model.safetensors -p "a cat" --auto-fit
+sd-cli -m model.safetensors -p "a cat" --auto-fit --max-vram cuda0=8,cuda1=14
+sd-cli -m model.safetensors -p "a cat" --auto-fit --split-mode row
+```
+
+Budgets reuse `--max-vram`: a positive per-device value caps what auto-fit
+plans with on that device, a negative value means "free memory minus that many
+GiB", and with no budget set each device's free memory minus a 512 MiB margin
+is used. (The same values still drive graph-cut segmented execution for
+modules that end up on a single device.)
+
+When everything fits resident, components are simply spread across the
+available GPUs. When it does not, auto-fit switches to time-share mode: the
+heavy components get `disk` params residency (loaded for their phase, freed
+after), and a component too large for any single device is split across all
+GPUs with the layer/row split mechanism (`--split-mode` selects which, layer
+by default). Components that fit nowhere fall back to the CPU. If a VAE decode
+still runs out of memory, tiling is enabled and the decode retried once.
+
 ## Modules
 
 | Module | Purpose | Accepted names |
