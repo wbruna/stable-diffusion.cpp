@@ -3010,22 +3010,6 @@ public:
         return !!flow_denoiser;
     }
 
-    //added for kcpp
-    void SetCircularAxesAll(bool circular_x, bool circular_y)
-    {
-        diffusion_model->set_circular_axes(circular_x, circular_y);
-        if (high_noise_diffusion_model) {
-            high_noise_diffusion_model->set_circular_axes(circular_x, circular_y);
-        }
-        if (control_net) {
-            control_net->set_circular_axes(circular_x, circular_y);
-        }
-        if (first_stage_model) {
-            first_stage_model->set_circular_axes(circular_x, circular_y);
-        }
-    }
-    //end added for kcpp
-
 };
 
 /*================================================= SD API ==================================================*/
@@ -6643,10 +6627,6 @@ namespace kcpp_sd {
         res.vae_scale_factor = ctx->sd->get_vae_scale_factor();
         res.spatial_multiple = get_spatial_multiple(ctx);
         return res;
-    }
-
-    void SetCircularAxesAll(sd_ctx_t* ctx, bool circular_x, bool circular_y) {
-        ctx->sd->SetCircularAxesAll(circular_x, circular_y);
     }
 
     void set_lora_cache(sd_ctx_t *ctx, bool enable) {
