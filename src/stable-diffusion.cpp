@@ -812,7 +812,8 @@ public:
         bool is_boogu = sd_version_is_boogu_image(tempver);
         bool is_krea2 = sd_version_is_krea2(tempver);
         bool is_sefi = sd_version_is_sefi_image(tempver);
-        bool conditioner_is_llm = (is_qwenimg || iszimg || isflux2 || is_ovis || is_anima || is_ernie || is_longcat || is_lens || is_ltx || is_ideogram || is_boogu || is_krea2 || is_sefi);
+        bool is_mageflow = sd_version_is_mage_flow(tempver);
+        bool conditioner_is_llm = (is_qwenimg || iszimg || isflux2 || is_ovis || is_anima || is_ernie || is_longcat || is_lens || is_ltx || is_ideogram || is_boogu || is_krea2 || is_sefi || is_mageflow);
         bool has_llm_vision = (is_qwenimg || is_longcat || is_boogu);
 
         //kcpp qol fallback: if a llm was loaded as t5 by mistake
