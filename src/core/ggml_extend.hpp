@@ -31,6 +31,15 @@
 #include "ggml-backend.h"
 #include "ggml.h"
 
+// kcpp sidestep int8 convrot support
+// detect ggml fork by the RPC_PROTO_PATCH_VERSION macro, changed by the PR
+#include "ggml-rpc.h"
+#if RPC_PROTO_PATCH_VERSION != 0
+  #define KCPP_MAINLINE_INT8_CONVROT 1
+#else
+  #define KCPP_MAINLINE_INT8_CONVROT 0
+#endif
+
 #include "core/tensor.hpp"
 #include "model.h"
 
@@ -1039,6 +1048,7 @@ __STATIC_INLINE__ ggml_tensor* ggml_ext_linear(ggml_context* ctx,
     return x;
 }
 
+#if KCPP_MAINLINE_INT8_CONVROT
 __STATIC_INLINE__ ggml_tensor* ggml_ext_linear_i8_tensorwise(ggml_context* ctx,
                                                              ggml_tensor* x,
                                                              ggml_tensor* w,
@@ -1070,6 +1080,7 @@ __STATIC_INLINE__ ggml_tensor* ggml_ext_linear_i8_tensorwise(ggml_context* ctx,
     }
     return x;
 }
+#endif
 
 __STATIC_INLINE__ ggml_tensor* ggml_ext_pad_ext(ggml_context* ctx,
                                                 ggml_backend_t backend,
@@ -3474,6 +3485,7 @@ public:
         }
         ggml_tensor* linear_bias = has_weight_scale ? nullptr : b;
         ggml_tensor* out         = nullptr;
+        #if KCPP_MAINLINE_INT8_CONVROT
         if (w->type == GGML_TYPE_I8) {
             if (x->type != GGML_TYPE_F32) {
                 x = ggml_ext_cast_f32(ctx->ggml_ctx, ctx->backend, x);
@@ -3517,6 +3529,7 @@ public:
             }
             return out;
         }
+        #endif // kcpp
         if (ctx->weight_adapter) {
             WeightAdapter::ForwardParams forward_params;
             forward_params.op_type               = WeightAdapter::ForwardParams::op_type_t::OP_LINEAR;

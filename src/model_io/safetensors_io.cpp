@@ -91,14 +91,18 @@ static ggml_type safetensors_dtype_to_ggml_type(const std::string& dtype) {
         ttype = GGML_TYPE_F16;
     } else if (dtype == "F8_E5M2") {
         ttype = GGML_TYPE_F16;
+#if !KCPP_MAINLINE_INT8_CONVROT
     } else if (dtype == "I8") {
         ttype = GGML_TYPE_F16;
+#endif
     } else if (dtype == "I32") {
         ttype = GGML_TYPE_I32;
     } else if (dtype == "I64") {
         ttype = GGML_TYPE_I32;
+#if KCPP_MAINLINE_INT8_CONVROT
     } else if (dtype == "I8") {
         ttype = GGML_TYPE_I8;
+#endif
     }
     return ttype;
 }
@@ -298,6 +302,7 @@ bool read_safetensors_file(const std::string& file_path,
         TensorStorage tensor_storage(name, type, ne, n_dims, 0, data_start + begin);
         tensor_storage.reverse_ne();
 
+        #if KCPP_MAINLINE_INT8_CONVROT
         if (ends_with(name, ".weight")) {
             const std::string module_name = name.substr(0, name.size() - std::string(".weight").size());
             auto config                   = comfy_quant_configs.find(module_name);
@@ -330,6 +335,7 @@ bool read_safetensors_file(const std::string& file_path,
                 tensor_storage.n_dims = 1;
             }
         }
+        #endif // kcpp
 
         size_t tensor_data_size = end - begin;
 
