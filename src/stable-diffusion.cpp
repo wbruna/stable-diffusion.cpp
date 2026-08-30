@@ -61,6 +61,7 @@
 #include "model/vae/wan_vae.hpp"
 #include "runtime/denoiser.hpp"
 #include "runtime/guidance.h"
+#include "runtime/preview_interval.h"
 #include "runtime/sample-cache.h"
 #include "upscaler.h"
 
@@ -2452,8 +2453,11 @@ public:
                                     sd_get_preview_mode()};
     }
 
-    void report_sample_progress(int step, size_t total_steps, int64_t* last_progress_us) {
-        if (step > 0 || step == -(int)total_steps) {
+    void report_sample_progress(int step,
+                                size_t total_steps,
+                                bool terminal_sigma_is_zero,
+                                int64_t* last_progress_us) {
+        if (sd::preview::sample_step_is_complete(step, total_steps, terminal_sigma_is_zero)) {
             int64_t now        = ggml_time_us();
             int showstep       = std::abs(step);
             float step_seconds = last_progress_us != nullptr && *last_progress_us > 0
@@ -2515,6 +2519,7 @@ public:
                              int audio_length,
                              float frame_rate,
                              const sd_cache_params_t* cache_params,
+                             bool preview_final_step,
                              const sd::Tensor<float>& video_positions = {}) {
         struct RunnerDoneOnExit {
             GGMLRunner* runner = nullptr;
@@ -2574,8 +2579,9 @@ public:
             }
         }
 
-        size_t steps       = sigmas.size() - 1;
-        bool has_skiplayer = (slg_scale != 0.0f || slg_uncond) && !skip_layers.empty();
+        size_t steps                = sigmas.size() - 1;
+        bool terminal_sigma_is_zero = sigmas.back() == 0.f;
+        bool has_skiplayer          = (slg_scale != 0.0f || slg_uncond) && !skip_layers.empty();
         if (has_skiplayer && !sd_version_is_dit(version)) {
             has_skiplayer = false;
             LOG_WARN("SLG is incompatible with this model type");
@@ -2624,6 +2630,13 @@ public:
             float c_out  = scaling[1];
             float c_in   = scaling[2];
 
+            bool preview_needed = preview.callback != nullptr &&
+                                  sd::preview::should_preview_sample_step(step,
+                                                                          steps,
+                                                                          terminal_sigma_is_zero,
+                                                                          sd_get_preview_interval(),
+                                                                          preview_final_step);
+
             std::vector<float> base_timesteps_vec = prepare_sample_timesteps(sigma, shifted_timestep);
             std::vector<float> timesteps_vec      = base_timesteps_vec;
             sd::Tensor<float> audio_timesteps_tensor;
@@ -2654,21 +2667,17 @@ public:
                 if (!denoise_mask.empty()) {
                     denoised = denoised * denoise_mask + init_latent * (1.0f - denoise_mask);
                 }
-                if (sd_should_preview_denoised() && preview.callback != nullptr) {
-                    if (step % sd_get_preview_interval() == 0) {
-                        preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
-                    }
+                if (preview_needed && sd_should_preview_denoised()) {
+                    preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
                 }
-                report_sample_progress(step, steps, &last_progress_us);
+                report_sample_progress(step, steps, terminal_sigma_is_zero, &last_progress_us);
                 sd::guidance::GuiderOutput output;
                 output.pred = denoised;
                 return output;
             }
 
-            if (sd_should_preview_noisy() && preview.callback != nullptr) {
-                if (step % sd_get_preview_interval() == 0) {
-                    preview_image(step, noised_input, version, preview.mode, preview.callback, preview.data, true);
-                }
+            if (preview_needed && sd_should_preview_noisy()) {
+                preview_image(step, noised_input, version, preview.mode, preview.callback, preview.data, true);
             }
 
             sd::Tensor<float> cond_out;
@@ -2881,12 +2890,10 @@ public:
             if (!denoise_mask.empty()) {
                 denoised = denoised * denoise_mask + init_latent * (1.0f - denoise_mask);
             }
-            if (sd_should_preview_denoised() && preview.callback != nullptr) {
-                if (step % sd_get_preview_interval() == 0) {
-                    preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
-                }
+            if (preview_needed && sd_should_preview_denoised()) {
+                preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
             }
-            report_sample_progress(step, steps, &last_progress_us);
+            report_sample_progress(step, steps, terminal_sigma_is_zero, &last_progress_us);
             output.pred = denoised;
             return output;
         };
@@ -5704,7 +5711,8 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
                                                    1.f,
                                                    0,
                                                    static_cast<float>(request.fps),
-                                                   request.cache_params);
+                                                   request.cache_params,
+                                                   true);
         int64_t sampling_end  = ggml_time_ms();
         if (!x_0.empty()) {
             LOG_INFO("sampling completed, taking %.2fs", (sampling_end - sampling_start) * 1.0f / 1000);
@@ -5825,7 +5833,8 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
                                                             1.f,
                                                             0,
                                                             static_cast<float>(request.fps),
-                                                            request.cache_params);
+                                                            request.cache_params,
+                                                            false);
             int64_t hires_sample_end   = ggml_time_ms();
             if (!x_0.empty()) {
                 LOG_INFO("hires sampling %d/%d completed, taking %.2fs",
@@ -6959,6 +6968,7 @@ SD_API bool generate_video(sd_ctx_t* sd_ctx,
                                                            latents.audio_length,
                                                            static_cast<float>(request.fps),
                                                            request.cache_params,
+                                                           true,
                                                            latents.video_positions);
         int64_t sampling_end          = ggml_time_ms();
         if (x_t_sampled.empty()) {
@@ -7001,6 +7011,7 @@ SD_API bool generate_video(sd_ctx_t* sd_ctx,
                                                         latents.audio_length,
                                                         static_cast<float>(request.fps),
                                                         request.cache_params,
+                                                        plan.high_noise_sample_steps <= 0,
                                                         latents.video_positions);
 
     int64_t sampling_end = ggml_time_ms();
@@ -7139,6 +7150,7 @@ SD_API bool generate_video(sd_ctx_t* sd_ctx,
                                             latents.audio_length,
                                             static_cast<float>(hires_request.fps),
                                             hires_request.cache_params,
+                                            false,
                                             hires_video_positions);
         sampling_end   = ggml_time_ms();
         if (final_latent.empty()) {
