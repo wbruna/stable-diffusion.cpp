@@ -2750,7 +2750,11 @@ public:
                         condition.c_reference_blocks.empty() ? nullptr : &condition.c_reference_blocks,
                         audio_length,
                         std::isfinite(active_flow_shift) ? active_flow_shift : 12.f,
-                        3.f};
+                        3.f,
+                        method == EULER_SAMPLE_METHOD && step > 0 &&
+                                static_cast<size_t>(step) < sigmas.size()
+                            ? sigmas[step]
+                            : -1.f};
                 } else if (sd_version_is_ltxav(version)) {
                     diffusion_params.extra = LTXAVDiffusionExtra{
                         nullptr,
