@@ -2946,7 +2946,9 @@ public:
                     denoised = denoised * denoise_mask + init_latent * (1.0f - denoise_mask);
                 }
                 if (sd_should_preview_denoised() && preview.callback != nullptr) {
-                    preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
+                    if (step % sd_get_preview_interval() == 0) {
+                        preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
+                    }
                 }
                 report_sample_progress(step, steps, &last_progress_us);
                 sd::guidance::GuiderOutput output;
@@ -2955,7 +2957,9 @@ public:
             }
 
             if (sd_should_preview_noisy() && preview.callback != nullptr) {
-                preview_image(step, noised_input, version, preview.mode, preview.callback, preview.data, true);
+                if (step % sd_get_preview_interval() == 0) {
+                    preview_image(step, noised_input, version, preview.mode, preview.callback, preview.data, true);
+                }
             }
 
             sd::Tensor<float> cond_out;
@@ -3165,7 +3169,9 @@ public:
                 denoised = denoised * denoise_mask + init_latent * (1.0f - denoise_mask);
             }
             if (sd_should_preview_denoised() && preview.callback != nullptr) {
-                preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
+                if (step % sd_get_preview_interval() == 0) {
+                    preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
+                }
             }
             report_sample_progress(step, steps, &last_progress_us);
             output.pred = denoised;
