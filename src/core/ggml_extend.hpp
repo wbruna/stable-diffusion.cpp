@@ -32,12 +32,8 @@
 #include "ggml.h"
 
 // kcpp sidestep int8 convrot support
-// detect ggml fork by the RPC_PROTO_PATCH_VERSION macro, changed by the PR
-#include "ggml-rpc.h"
-#if RPC_PROTO_PATCH_VERSION != 0
-  #define KCPP_MAINLINE_INT8_CONVROT 1
-#else
-  #define KCPP_MAINLINE_INT8_CONVROT 0
+#ifndef KCPP_MAINLINE_INT8_CONVROT
+#define KCPP_MAINLINE_INT8_CONVROT 0
 #endif
 
 #include "core/tensor.hpp"
