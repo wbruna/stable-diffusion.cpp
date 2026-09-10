@@ -93,66 +93,6 @@ std::string kcpp_fix_wrong_img_tensor_name(const std::string& name) //kcpp funct
     return name;
 }
 
-uint16_t f8_e4m3_to_f16(uint8_t f8) {
-    // do we need to support uz?
-
-    const uint32_t exponent_bias = 7;
-    if (f8 == 0xff) {
-        return ggml_fp32_to_fp16(-NAN);
-    } else if (f8 == 0x7f) {
-        return ggml_fp32_to_fp16(NAN);
-    }
-
-    uint32_t sign     = f8 & 0x80;
-    uint32_t exponent = (f8 & 0x78) >> 3;
-    uint32_t mantissa = f8 & 0x07;
-    uint32_t result   = sign << 24;
-    if (exponent == 0) {
-        if (mantissa > 0) {
-            exponent = 0x7f - exponent_bias;
-
-            // yes, 2 times
-            if ((mantissa & 0x04) == 0) {
-                mantissa &= 0x03;
-                mantissa <<= 1;
-                exponent -= 1;
-            }
-            if ((mantissa & 0x04) == 0) {
-                mantissa &= 0x03;
-                mantissa <<= 1;
-                exponent -= 1;
-            }
-
-            result |= (mantissa & 0x03) << 21;
-            result |= exponent << 23;
-        }
-    } else {
-        result |= mantissa << 20;
-        exponent += 0x7f - exponent_bias;
-        result |= exponent << 23;
-    }
-
-    return ggml_fp32_to_fp16(*reinterpret_cast<const float*>(&result));
-}
-
-uint16_t f8_e5m2_to_f16(uint8_t fp8) {
-    return static_cast<uint16_t>(fp8) << 8;
-}
-
-void f8_e4m3_to_f16_vec(uint8_t* src, uint16_t* dst, int64_t n) {
-    // support inplace op
-    for (int64_t i = n - 1; i >= 0; i--) {
-        dst[i] = f8_e4m3_to_f16(src[i]);
-    }
-}
-
-void f8_e5m2_to_f16_vec(uint8_t* src, uint16_t* dst, int64_t n) {
-    // support inplace op
-    for (int64_t i = n - 1; i >= 0; i--) {
-        dst[i] = f8_e5m2_to_f16(src[i]);
-    }
-}
-
 void f64_to_f32_vec(double* src, float* dst, int64_t n) {
     // support inplace op
     for (int64_t i = 0; i < n; i++) {
@@ -958,9 +898,7 @@ std::vector<MmapTensorStore> ModelLoader::mmap_tensors(std::map<std::string, ggm
             if (dst_tensor == nullptr)
                 continue;
 
-            if (tensor_storage.is_f8_e4m3 ||
-                tensor_storage.is_f8_e5m2 ||
-                tensor_storage.is_f64 ||
+            if (tensor_storage.is_f64 ||
                 tensor_storage.is_i64 ||
                 tensor_storage.kcpp_ext ||
                 tensor_storage.type != dst_tensor->type) {
