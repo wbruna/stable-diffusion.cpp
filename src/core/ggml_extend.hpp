@@ -36,6 +36,11 @@
 #define KCPP_MAINLINE_INT8_CONVROT 0
 #endif
 
+// kcpp sidestep fp8 scaled support
+#ifndef KCPP_MAINLINE_FP8_SCALED
+#define KCPP_MAINLINE_FP8_SCALED 0
+#endif
+
 #include "core/tensor.hpp"
 #include "model.h"
 
@@ -3476,9 +3481,11 @@ public:
     ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) override {
         ggml_tensor* w            = params["weight"];
         ggml_tensor* weight_scale = has_weight_scale ? params["weight_scale"] : nullptr;
+      #if KCPP_MAINLINE_FP8_SCALED
         if (w->type == GGML_TYPE_F8_E4M3 || w->type == GGML_TYPE_F8_E5M2) {
             w = ggml_cast(ctx->ggml_ctx, w, GGML_TYPE_BF16);
         }
+      #endif
         ggml_tensor* b = nullptr;
         if (bias) {
             b = params["bias"];

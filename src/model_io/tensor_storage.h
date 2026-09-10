@@ -61,9 +61,13 @@ struct TensorStorage {
 
     int64_t nbytes_to_read() const {
         if (is_f64 || is_i64) {
+            return nbytes() * 2;
+#if !KCPP_MAINLINE_FP8_SCALED
+        } else if (is_f8_e4m3 || is_f8_e5m2) {
+            return nbytes() / 2;
+#endif
         } else if (kcpp_ext) {
             return nelements();
-            return nbytes() * 2;
         } else {
             return nbytes();
         }
