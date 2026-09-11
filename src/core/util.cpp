@@ -1,6 +1,7 @@
 #include "core/util.h"
 #include <algorithm>
 #include <cctype>
+#include <climits>
 #include <cmath>
 #include <codecvt>
 #include <cstdarg>
@@ -519,7 +520,7 @@ bool parse_strict_bool(const std::string& text, bool& value) {
 }
 
 // { kcpp
-static int sdloglevel = 0; //-1 = hide all, 0 = normal, 1 = showall
+static int sdloglevel = INT_MAX; // -1 = hide all, 0 = normal, 1 = showall, INT_MAX = sdcpp
 static bool sdquiet = false;
 // } kcpp
 
@@ -620,19 +621,16 @@ void* sd_log_cb_data         = nullptr;
 #define LOG_BUFFER_SIZE 4096
 
 void log_printf(sd_log_level_t level, const char* file, int line, const char* format, ...) {
-#if 1 //kcpp
-    if (sdloglevel>0) {
+    if (sdloglevel > 0 && sdloglevel != INT_MAX) {
         printf("\n");
         va_list args;
         va_start(args, format);
         vprintf(format, args);
         va_end(args);
         fflush(stdout);
+        return;
     }
-    (void) level;
-    (void) file;
-    (void) line;
-#else //kcpp
+
     va_list args;
     va_start(args, format);
 
@@ -652,7 +650,6 @@ void log_printf(sd_log_level_t level, const char* file, int line, const char* fo
     }
 
     va_end(args);
-#endif //kcpp
 }
 
 void sd_ggml_log_callback(ggml_log_level level, const char* text, void*) {
