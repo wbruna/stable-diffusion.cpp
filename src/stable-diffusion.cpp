@@ -6252,6 +6252,15 @@ static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd
     sd::Tensor<float> start_image;
     sd::Tensor<float> end_image;
 
+    struct RunnerEndGuard {
+        GGMLRunner* runner = nullptr;
+        ~RunnerEndGuard() {
+            if (runner) {
+                runner->runner_end();
+            }
+        }
+    } runner_guard{sd_ctx->sd->audio_vae_model.get()};
+
     if (sd_vid_gen_params->init_image.data) {
         start_image = sd_image_to_tensor(sd_vid_gen_params->init_image, request->width, request->height);
     }
@@ -6916,10 +6925,6 @@ static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd
                                                                            has_input_audio ? 0.f : 1.f);
         }
         latents.init_latent = pack_ltxav_audio_and_video_latents(latents.init_latent, latents.audio_latent);
-    }
-
-    if (sd_ctx->sd->audio_vae_model != nullptr) {
-        sd_ctx->sd->audio_vae_model->runner_done();
     }
 
     return latents;
@@ -7600,6 +7605,15 @@ SD_API bool generate_video(sd_ctx_t* sd_ctx,
     int64_t latent_end = ggml_time_ms();
     LOG_INFO("generating latent video completed, taking %.2fs", (latent_end - latent_start) * 1.0f / 1000);
 
+    struct RunnerEndGuard {
+        GGMLRunner* runner = nullptr;
+        ~RunnerEndGuard() {
+            if (runner) {
+                runner->runner_end();
+            }
+        }
+    } runner_guard{sd_ctx->sd->audio_vae_model.get()};
+
     sd_audio_t* generated_audio = nullptr;
     if ((sd_version_is_ltxav(sd_ctx->sd->version) || sd_version_is_minimax_h3(sd_ctx->sd->version)) &&
         has_input_audio) {
@@ -7635,10 +7649,6 @@ SD_API bool generate_video(sd_ctx_t* sd_ctx,
         }
         int64_t audio_latent_decode_end = ggml_time_ms();
         LOG_INFO("decoding audio latent completed, taking %.2fs", (audio_latent_decode_end - audio_latent_decode_start) * 1.0f / 1000);
-    }
-
-    if (sd_ctx->sd->audio_vae_model != nullptr) {
-        sd_ctx->sd->audio_vae_model->runner_done();
     }
 
     if (latents.video_conditioning_frame_count > 0) {
