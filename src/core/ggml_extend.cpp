@@ -240,6 +240,7 @@ ggml_tensor* ggml_ext_linear(ggml_context* ctx,
     return x;
 }
 
+#if KCPP_MAINLINE_INT8_CONVROT
 ggml_tensor* ggml_ext_linear_i8_tensorwise(ggml_context* ctx,
                                            ggml_tensor* x,
                                            ggml_tensor* w,
@@ -271,6 +272,7 @@ ggml_tensor* ggml_ext_linear_i8_tensorwise(ggml_context* ctx,
     }
     return x;
 }
+#endif //kcpp
 
 ggml_tensor* ggml_ext_pad_ext(ggml_context* ctx,
                               ggml_backend_t backend,

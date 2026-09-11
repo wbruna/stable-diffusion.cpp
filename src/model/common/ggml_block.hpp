@@ -207,6 +207,7 @@ public:
     ggml_tensor* forward(GGMLRunnerContext* ctx, ggml_tensor* x) override {
         ggml_tensor* w            = params["weight"];
         ggml_tensor* weight_scale = has_weight_scale ? params["weight_scale"] : nullptr;
+        #if KCPP_MAINLINE_FP8_SCALED
         if (w->type == GGML_TYPE_F8_E4M3 || w->type == GGML_TYPE_F8_E5M2) {
             bool supports_fp8_matmul = false;
             if (ctx->backend != nullptr) {
@@ -220,12 +221,14 @@ public:
                 w = ggml_cast(ctx->ggml_ctx, w, GGML_TYPE_BF16);
             }
         }
+        #endif //kcpp
         ggml_tensor* b = nullptr;
         if (bias) {
             b = params["bias"];
         }
         ggml_tensor* linear_bias = has_weight_scale ? nullptr : b;
         ggml_tensor* out         = nullptr;
+        #if KCPP_MAINLINE_INT8_CONVROT
         if (w->type == GGML_TYPE_I8) {
             if (x->type != GGML_TYPE_F32) {
                 x = ggml_ext_cast_f32(ctx->ggml_ctx, ctx->backend, x);
@@ -269,6 +272,7 @@ public:
             }
             return out;
         }
+        #endif //kcpp
         if (has_weight_scale) {
             out = ggml_ext_linear(ctx->ggml_ctx, x, w, nullptr, force_prec_f32, scale);
             out = ggml_mul(ctx->ggml_ctx, out, weight_scale);
