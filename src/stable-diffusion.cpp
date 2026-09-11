@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cinttypes>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -9,9 +10,12 @@
 #include <utility>
 #include <vector>
 
-#include "core/ggml_extend.hpp"
+#include "core/ggml_extend_backend.h"
 #include "core/ggml_graph_cut.h"
+#include "core/ggml_runner.h"
+#include "core/ggml_tensor_utils.h"
 #include "core/layer_split_partition.h"
+#include "model.h"
 
 #include "core/rng.hpp"
 #include "core/rng_mt19937.hpp"
@@ -1152,7 +1156,7 @@ public:
             sampler_rng = rng;
         }
 
-        ggml_log_set(ggml_log_callback_default, nullptr);
+        ggml_log_set(sd_ggml_log_callback, nullptr);
 
         model_manager = std::make_shared<ModelManager>();
         model_manager->set_n_threads(n_threads);
