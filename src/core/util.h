@@ -36,7 +36,6 @@ std::string sd_get_u8path(const std::string& file_path);
 
 sd_image_t tensor_to_sd_image(const sd::Tensor<float>& tensor, int frame_index = 0);
 
-
 sd::Tensor<float> sd_image_to_tensor(sd_image_t image,
                                      int target_width  = -1,
                                      int target_height = -1,
@@ -107,13 +106,9 @@ void* sd_get_backend_eval_callback_data();
 // test if the backend is a specific one, e.g. "CUDA", "ROCm", "Vulkan" etc.
 bool sd_backend_is(ggml_backend_t backend, const std::string& name);
 
-void log_message(const char* format, ...);
-#define LOG_DEBUG(...)  log_message(__VA_ARGS__)
-#define LOG_INFO(...)  log_message(__VA_ARGS__)
-#define LOG_WARN(...)  log_message(__VA_ARGS__)
-#define LOG_ERROR(...)  log_message(__VA_ARGS__)
-// #define LOG_DEBUG(format, ...) log_printf(SD_LOG_DEBUG, __FILE__, __LINE__, format, ##__VA_ARGS__)
-// #define LOG_INFO(format, ...) log_printf(SD_LOG_INFO, __FILE__, __LINE__, format, ##__VA_ARGS__)
-// #define LOG_WARN(format, ...) log_printf(SD_LOG_WARN, __FILE__, __LINE__, format, ##__VA_ARGS__)
-// #define LOG_ERROR(format, ...) log_printf(SD_LOG_ERROR, __FILE__, __LINE__, format, ##__VA_ARGS__)
+#define LOG_DEBUG(format, ...) log_printf(SD_LOG_DEBUG, __FILE__, __LINE__, format, ##__VA_ARGS__)
+#define LOG_VERBOSE(format, ...) log_printf(SD_LOG_VERBOSE, __FILE__, __LINE__, format, ##__VA_ARGS__)
+#define LOG_INFO(format, ...) log_printf(SD_LOG_INFO, __FILE__, __LINE__, format, ##__VA_ARGS__)
+#define LOG_WARN(format, ...) log_printf(SD_LOG_WARN, __FILE__, __LINE__, format, ##__VA_ARGS__)
+#define LOG_ERROR(format, ...) log_printf(SD_LOG_ERROR, __FILE__, __LINE__, format, ##__VA_ARGS__)
 #endif  // __SD_CORE_UTIL_H__

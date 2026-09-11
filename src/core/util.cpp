@@ -618,7 +618,8 @@ void* sd_log_cb_data         = nullptr;
 
 #define LOG_BUFFER_SIZE 4096
 
-void log_message(const char* format, ...) {
+void log_printf(sd_log_level_t level, const char* file, int line, const char* format, ...) {
+#if 1 //kcpp
     if (sdloglevel>0) {
         printf("\n");
         va_list args;
@@ -627,9 +628,10 @@ void log_message(const char* format, ...) {
         va_end(args);
         fflush(stdout);
     }
-}
-
-void log_printf(sd_log_level_t level, const char* file, int line, const char* format, ...) {
+    (void) level;
+    (void) file;
+    (void) line;
+#else //kcpp
     va_list args;
     va_start(args, format);
 
@@ -649,6 +651,7 @@ void log_printf(sd_log_level_t level, const char* file, int line, const char* fo
     }
 
     va_end(args);
+#endif //kcpp
 }
 
 void sd_set_log_callback(sd_log_cb_t cb, void* data) {
