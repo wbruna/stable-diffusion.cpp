@@ -82,6 +82,11 @@ public:
     std::vector<RuntimeLora> runtime_lora_models;
     bool apply_lora_immediately = false;
     int animatediff_num_frames  = 0;
+    // kcpp
+    std::map<std::string, std::shared_ptr<LoraModel>> kcpp_lora_cache;
+    bool kcpp_lora_cache_populate = false;
+    std::string kcpp_taesd_path;
+    // kcpp
 
     std::string taesd_path;
     sd_tiling_params_t vae_tiling_params = {false, false, 0, 0, 0.5f, 0, 0, nullptr};

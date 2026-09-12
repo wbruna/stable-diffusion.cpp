@@ -686,9 +686,10 @@ void StableDiffusionGGML::load_alphas_cumprod() {
 }
 
 bool StableDiffusionGGML::init_model_loader(ModelLoader& model_loader, ModelConfig& configuration) {
-    const auto* sd_ctx_params = &configuration.params;
+    auto* sd_ctx_params       = &configuration.params; // kcpp make ctx params mutable
     auto& use_tae             = configuration.use_tae;
     auto& use_audio_vae       = configuration.use_audio_vae;
+
     if (strlen(SAFE_STR(sd_ctx_params->model_path)) > 0) {
         LOG_INFO("loading model from '%s'", sd_ctx_params->model_path);
         if (!model_loader.init_from_file(sd_ctx_params->model_path)) {
@@ -701,6 +702,231 @@ bool StableDiffusionGGML::init_model_loader(ModelLoader& model_loader, ModelConf
         if (!model_loader.init_from_file(sd_ctx_params->diffusion_model_path, "model.diffusion_model.")) {
             LOG_WARN("loading diffusion model from '%s' failed", sd_ctx_params->diffusion_model_path);
         }
+    }
+
+    {   // begin kcpp replacements
+        auto& p = *sd_ctx_params;
+        SDVersion tempver = model_loader.get_sd_version();
+        bool fallback_swapped = false;
+
+        auto path_empty = [](const char* path) -> bool {
+            return path == nullptr || *path == '\0';
+        };
+
+        // kcpp fallback to separate diffusion model passed as model
+        if (!path_empty(p.model_path) &&
+        path_empty(p.diffusion_model_path) &&
+        (!path_empty(p.t5xxl_path)||!path_empty(p.clip_l_path)))
+        {
+            bool endswithsafetensors = ends_with(p.model_path, ".safetensors");
+            if(endswithsafetensors && !model_loader.has_diffusion_model_tensors())
+            {
+                LOG_INFO("SD Diffusion Model tensors missing! Fallback trying alternative tensor names...\n");
+                if (!model_loader.init_from_file(p.model_path, "model.diffusion_model.")) {
+                    LOG_WARN("loading diffusion model from '%s' failed", p.model_path);
+                }
+                fallback_swapped = true;
+                tempver = model_loader.get_sd_version();
+            }
+        }
+
+        if (tempver == VERSION_ANIMA && !fallback_swapped &&
+            !path_empty(p.model_path) &&
+            path_empty(p.diffusion_model_path) &&
+            !model_loader.has_diffusion_model_tensors()
+            )
+        {
+            LOG_INFO("Anima: SD Diffusion Model tensors missing! Fallback trying alternative tensor names...\n");
+            if (!model_loader.init_from_file(p.model_path, "model.diffusion_model.")) {
+                LOG_WARN("loading diffusion model from '%s' failed", p.model_path);
+            }
+            tempver = model_loader.get_sd_version();
+        }
+
+        auto toLowerCase = [](const std::string& str) -> std::string {
+            std::string result;
+            std::locale loc;
+            for (char ch : str) {
+                result += std::tolower(ch, loc); // Use locale-aware tolower
+            }
+            return result;
+        };
+
+        bool iswan = sd_version_is_wan(tempver);
+        bool is_wan21 = sd_version_is_wan(tempver) && tempver != VERSION_WAN2_2_TI2V;
+        bool is_qwenimg = sd_version_is_qwen_image(tempver);
+        bool iszimg = sd_version_is_z_image(tempver);
+        bool isflux2 = sd_version_is_flux2(tempver);
+        bool is_ovis =  (tempver==VERSION_OVIS_IMAGE);
+        bool is_anima = sd_version_is_anima(tempver);
+        bool is_ernie = sd_version_is_ernie_image(tempver);
+        bool is_longcat = sd_version_is_longcat(tempver);
+        bool is_lens = sd_version_is_lens(tempver);
+        bool is_ltx = sd_version_is_ltxav(tempver);
+        bool is_ideogram = sd_version_is_ideogram4(tempver);
+        bool is_boogu = sd_version_is_boogu_image(tempver);
+        bool is_krea2 = sd_version_is_krea2(tempver);
+        bool is_sefi = sd_version_is_sefi_image(tempver);
+        bool is_mageflow = sd_version_is_mage_flow(tempver);
+        bool is_minimaxh3 = sd_version_is_minimax_h3(tempver);
+        bool conditioner_is_llm = (is_qwenimg || iszimg || isflux2 || is_ovis || is_anima || is_ernie || is_longcat || is_lens || is_ltx || is_ideogram || is_boogu || is_krea2 || is_sefi || is_mageflow || is_minimaxh3);
+        bool has_llm_vision = (is_qwenimg || is_longcat || is_boogu);
+
+        //kcpp qol fallback: if a llm was loaded as t5 by mistake
+        if(conditioner_is_llm && !path_empty(p.t5xxl_path))
+        {
+            if(path_empty(p.clip_l_path))
+            {
+                std::swap(p.clip_l_path, p.t5xxl_path);
+            }
+            else if(path_empty(p.clip_g_path))
+            {
+                //very tricky case. see if we can tell if clipl is an mmproj, if so move to right place
+                if(toLowerCase(p.clip_l_path).find("mmproj") != std::string::npos || is_ltx)
+                {
+                    // g = l, l = t, t = ""
+                    std::swap(p.clip_g_path, p.clip_l_path);
+                    std::swap(p.clip_l_path, p.t5xxl_path);
+                }
+            }
+        }
+
+        //settle clip-l replacements
+        if (!path_empty(p.clip_l_path))
+        {
+            if(conditioner_is_llm && path_empty(p.llm_path))
+            {
+                std::swap(p.llm_path, p.clip_l_path);
+            }
+            else if(iswan)
+            {
+                if(path_empty(p.t5xxl_path))
+                {
+                    std::swap(p.t5xxl_path, p.clip_l_path);
+                } else if (path_empty(p.clip_vision_path)) {
+                    std::swap(p.clip_vision_path, p.clip_l_path);
+                }
+            }
+        }
+
+        //settle clip-g replacements
+        if (!path_empty(p.clip_g_path))
+        {
+            if(iswan && path_empty(p.clip_vision_path))
+            {
+                std::swap(p.clip_vision_path, p.clip_g_path);
+            }
+            else if(has_llm_vision && path_empty(p.llm_vision_path))
+            {
+                std::swap(p.llm_vision_path, p.clip_g_path);
+            }
+            else if(is_ltx)
+            {
+                std::swap(p.embeddings_connectors_path, p.clip_g_path);
+            }
+            else if(is_ideogram)
+            {
+                std::swap(p.uncond_diffusion_model_path, p.clip_g_path);
+            }
+        }
+
+        //settle possible inversions for mmproj
+        if(!path_empty(p.llm_vision_path) && !path_empty(p.llm_path))
+        {
+            if(toLowerCase(p.llm_vision_path).find("mmproj") == std::string::npos &&
+            toLowerCase(p.llm_path).find("mmproj") != std::string::npos)
+            {
+                std::swap(p.llm_path, p.llm_vision_path);
+            }
+        }
+
+        //settle tae replacements
+        kcpp_taesd_path = SAFE_STR(sd_ctx_params->taesd_path);
+        if(kcpp_taesd_path != "")
+        {
+            std::string to_search = "taesd.embd";
+            std::string to_replace = "";
+            if(sd_version_is_sd1(tempver) || sd_version_is_sd2(tempver))
+            {
+                to_replace = "taesd.embd";
+            }
+            else if(sd_version_is_sdxl(tempver))
+            {
+                to_replace = "taesd_xl.embd";
+            }
+            else if(sd_version_uses_flux_vae(tempver))
+            {
+                to_replace = "taesd_f.embd";
+            }
+            else if(sd_version_is_sd3(tempver))
+            {
+                to_replace = "taesd_3.embd";
+            }
+            else if(sd_version_uses_flux2_vae(tempver))
+            {
+                to_replace = "taesd_f2.embd";
+            }
+            else if(sd_version_uses_wan_vae(tempver))
+            {
+                to_replace = "taesd_w21.embd";
+            }
+
+            if(to_replace!="")
+            {
+                size_t pos = kcpp_taesd_path.find(to_search);
+                if (pos != std::string::npos) {
+                    kcpp_taesd_path.replace(pos, to_search.length(), to_replace);
+                }
+            }
+            else
+            {
+                printf("\nCannot use TAESD: Unknown tempver %d. TAESD Disabled!\n",tempver);
+                kcpp_taesd_path = "";
+            }
+            if (kcpp_taesd_path != "" && !file_exists(kcpp_taesd_path))
+            {
+                printf("\nCannot use TAESD: \"%s\" not found. TAESD Disabled!\n", kcpp_taesd_path.c_str());
+                kcpp_taesd_path = "";
+            }
+        }
+        if (!path_empty(p.photo_maker_path) > 0 && tempver != VERSION_SDXL) {
+            printf("\nWARNING: PhotoMaker is only compatible with SDXL models. PhotoMaker will be disabled!\n");
+            p.photo_maker_path = "";
+        }
+
+        //for models with TAE suppport, if vae is set, tae is off, and it looks like a tae, swap to tae
+        if(kcpp_taesd_path=="" && !path_empty(p.vae_path) && toLowerCase(p.vae_path).rfind("tae")!=std::string::npos)
+        {
+            try {
+                const uintmax_t tae_size_limit = 64 * 1024 * 1024; //if its less than 64mb, it might be a TAE
+                // Get the file size in bytes cross-platform
+                uintmax_t size = std::filesystem::file_size(p.vae_path);
+                if (size > 0 && size < tae_size_limit) {
+                    printf("\nVAE appears to be a TAE, loading as TAE instead!\n");
+                    kcpp_taesd_path = p.vae_path;
+                    p.vae_path = "";
+                }
+            }
+            catch (const std::filesystem::filesystem_error& e) {
+                std::printf("Error accessing file: %s\n", e.what());
+            }
+        }
+
+        p.taesd_path = kcpp_taesd_path.c_str();
+
+        // patch hidream to fix broken images on vulkan
+        // https://github.com/leejet/stable-diffusion.cpp/issues/1496
+        if(tempver == VERSION_HIDREAM_O1 && path_empty(p.tensor_type_rules))
+        {
+            p.tensor_type_rules = "^model.language_model.layers.[0-9]+.mlp.down_proj.weight=bf16";
+        }
+
+        //debug print
+        // printf("\n\nclip_g: %s\nclip_l: %s\nclip_vision: %s\nllm: %s\nllm_vision: %s\nt5xxl: %s\ntaesd: %s\n",
+        // p.clip_g_path, p.clip_l_path, p.clip_vision_path,
+        // p.llm_path, p.llm_vision_path, p.t5xxl_path,
+        // p.taesd_path);
+        // end kcpp replacements
     }
 
     if (strlen(SAFE_STR(sd_ctx_params->high_noise_diffusion_model_path)) > 0) {
@@ -1079,7 +1305,10 @@ bool StableDiffusionGGML::validate_and_load_runners() {
     const bool tae_preview_only = this->tae_preview_only();
     if (sd_ctx_params->flash_attn) {
         LOG_INFO("Using flash attention");
+        if(!sd_version_is_qwen_image(version)) //kcpp: edit 14feb, breaks qwen image edit
+        {
         cond_stage_model->set_flash_attention_enabled(true);
+        }
         if (clip_vision) {
             clip_vision->set_flash_attention_enabled(true);
         }
@@ -1112,7 +1341,7 @@ bool StableDiffusionGGML::validate_and_load_runners() {
     ignore_tensors.insert("model.diffusion_model.__index_timestep_zero__");
 
     if (audio_vae_model) {
-        if (!sd_version_is_minimax_h3(version)) {
+        if (!sd_version_is_minimax_h3(version) && !sd_version_is_ltxav(version)) { // kcpp
             ignore_tensors.insert("audio_vae.encoder");
         }
     }
@@ -1468,6 +1697,17 @@ std::shared_ptr<LoraModel> StableDiffusionGGML::load_lora_model(const ModelManag
     if (lora_spec.is_high_noise) {
         LOG_VERBOSE("high noise lora: %s", lora_spec.path.c_str());
     }
+    // kcpp first check the cache
+    std::string lora_key = "|" + std::to_string(static_cast<int>(module)) + "|" + lora_log_id(lora_spec);
+    if (!apply_lora_immediately) {
+        auto it = kcpp_lora_cache.find(lora_key);
+        if (it != kcpp_lora_cache.end()) {
+            if (it->second) {
+                it->second->multiplier = lora_spec.multiplier;
+            }
+            return it->second;
+        }
+    }
     const auto mode                        = backend_manager.params_backend_is_disk(module)
                                                  ? ModelManager::ResidencyMode::Disk
                                                  : ModelManager::ResidencyMode::ParamBackend;
@@ -1482,10 +1722,17 @@ std::shared_ptr<LoraModel> StableDiffusionGGML::load_lora_model(const ModelManag
     }
     if (!lora->init_params(n_threads, lora_tensor_filter)) {
         LOG_WARN("load lora tensors from %s failed", lora_spec.path.c_str());
-        return nullptr;
+        // kcpp also cache negatives to avoid I/O at runtime
+        lora = nullptr;
+        if (!apply_lora_immediately && kcpp_lora_cache_populate)
+            kcpp_lora_cache[lora_key] = lora;
+        return lora;
     }
 
     lora->multiplier = lora_spec.multiplier;
+    // kcpp add to cache
+    if (!apply_lora_immediately && kcpp_lora_cache_populate)
+        kcpp_lora_cache[lora_key] = lora;
     return lora;
 }
 

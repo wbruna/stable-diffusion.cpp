@@ -580,6 +580,7 @@ void sd_vid_gen_params_init(sd_vid_gen_params_t* sd_vid_gen_params) {
     sd_vid_gen_params->seed                                  = -1;
     sd_vid_gen_params->video_frames                          = 6;
     sd_vid_gen_params->fps                                   = 16;
+    sd_vid_gen_params->input_audio                           = nullptr;
     sd_vid_gen_params->moe_boundary                          = 0.875f;
     sd_vid_gen_params->vace_strength                         = 1.f;
     sd_vid_gen_params->vae_tiling_params                     = {false, false, 0, 0, 0.5f, 0.0f, 0.0f, nullptr};
@@ -758,4 +759,62 @@ SD_API void free_sd_images(sd_image_t* result_images, int num_images) {
     }
 
     free(result_images);
+}
+
+#include "kcpp_sd_extensions.h"
+#include "model/diffusion/flux.hpp"
+
+namespace kcpp_sd {
+
+    int get_loaded_sd_version(sd_ctx_t* ctx) {
+        return ctx->sd->version;
+    }
+
+    bool loaded_model_is_chroma(sd_ctx_t* ctx) {
+        if (ctx != nullptr && ctx->sd != nullptr) {
+            auto maybe_flux = std::dynamic_pointer_cast<Flux::FluxRunner>(ctx->sd->diffusion_model);
+            if (maybe_flux != nullptr) {
+                return maybe_flux->config.is_chroma;
+            }
+        }
+        return false;
+    }
+
+    int get_spatial_multiple(sd_ctx_t* ctx) {
+        return ctx->sd->get_vae_scale_factor() * ctx->sd->get_diffusion_model_down_factor();
+    }
+
+    model_info get_model_info(sd_ctx_t* ctx)
+    {
+        model_info res = {};
+        auto loadedsdver = get_loaded_sd_version(ctx);
+        res.is_wan = (loadedsdver == SDVersion::VERSION_WAN2 || loadedsdver == SDVersion::VERSION_WAN2_2_I2V || loadedsdver == SDVersion::VERSION_WAN2_2_TI2V);
+        res.is_qwenimg = (loadedsdver == SDVersion::VERSION_QWEN_IMAGE);
+        res.is_chroma = loaded_model_is_chroma(ctx);
+        res.is_kontext = (loadedsdver==SDVersion::VERSION_FLUX && !res.is_chroma);
+        res.is_flux2 = (loadedsdver == SDVersion::VERSION_FLUX2 || loadedsdver == SDVersion::VERSION_FLUX2_KLEIN);
+        res.is_flux1 = (loadedsdver == SDVersion::VERSION_FLUX);
+        res.is_zimage = (loadedsdver == SDVersion::VERSION_Z_IMAGE);
+        res.is_sdxs = (loadedsdver == SDVersion::VERSION_SDXS_512_DS || loadedsdver == SDVersion::VERSION_SDXS_09);
+        res.is_sd1 = (loadedsdver == SDVersion::VERSION_SD1);
+        res.is_sd2 = (loadedsdver == SDVersion::VERSION_SD2);
+        res.is_sdxl = sd_version_is_sdxl((SDVersion)loadedsdver);
+        res.is_ltx = sd_version_is_ltxav((SDVersion)loadedsdver);
+        res.is_minimaxh3 = sd_version_is_minimax_h3((SDVersion)loadedsdver);
+        res.is_boogu = sd_version_is_boogu_image((SDVersion)loadedsdver);
+        res.supports_ref_image = sd_version_supports_ref_latent_img_cfg((SDVersion)loadedsdver);
+        res.vae_scale_factor = ctx->sd->get_vae_scale_factor();
+        res.spatial_multiple = get_spatial_multiple(ctx);
+        return res;
+    }
+
+    void set_lora_cache(sd_ctx_t *ctx, bool enable) {
+        ctx->sd->kcpp_lora_cache_populate = enable;
+    }
+
+    void apply_loras(sd_ctx_t *ctx, const std::vector<sd_lora_t>& lora_specs)
+    {
+        ctx->sd->apply_loras(lora_specs.data(), lora_specs.size());
+    }
+
 }
