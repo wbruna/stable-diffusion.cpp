@@ -124,6 +124,9 @@ public:
     MT19937RNG(uint64_t seed = 0) { manual_seed(seed); }
 
     virtual const char* const rn() const override { return "cpu"; }
+    virtual const std::shared_ptr<RNG> clone() const override {
+        return std::make_shared<MT19937RNG>(*this);
+    }
 
     void manual_seed(uint64_t seed) override {
         s.seed_     = seed;
