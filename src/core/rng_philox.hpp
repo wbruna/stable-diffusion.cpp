@@ -94,6 +94,9 @@ public:
     }
 
     virtual const char* const rn() const override { return "cuda"; }
+    virtual const std::shared_ptr<RNG> clone() const override {
+        return std::make_shared<PhiloxRNG>(*this);
+    }
 
     void manual_seed(uint64_t seed) override {
         this->seed   = seed;
