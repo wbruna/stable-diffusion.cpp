@@ -2724,9 +2724,10 @@ public:
                              uint64_t seed)
         : t_min_(sigma_min),
           t_max_(sigma_max),
-          rng(r),  // rng(std::move(r))
+          app_wide_rng(std::move(r)),
           shape_(x_template.shape()),
           root_seed_(mix64(seed, 0x9E3779B97F4A7C15ULL)) {
+        auto rng = app_wide_rng->clone();
         rng->manual_seed(mix64(seed, 0xBF58476D1CE4E5B9ULL));
         w_at_tmax_ = sd::Tensor<float>::randn(shape_, rng) * std::sqrt(static_cast<float>(t_max_ - t_min_));
     }
@@ -2759,12 +2760,13 @@ private:
             return it->second;
         }
         sd::Tensor<float> zero = sd::Tensor<float>::zeros(shape_);
-        sd::Tensor<float> out  = bridge(t_min_, t_max_, zero, w_at_tmax_, t, root_seed_, kMaxDepth);
+        sd::Tensor<float> out  = bridge(app_wide_rng, t_min_, t_max_, zero, w_at_tmax_, t, root_seed_, kMaxDepth);
         cache_.emplace(t, out);
         return out;
     }
 
-    sd::Tensor<float> bridge(double a,
+    sd::Tensor<float> bridge(std::shared_ptr<RNG> r,
+                             double a,
                              double c,
                              const sd::Tensor<float>& w_a,
                              const sd::Tensor<float>& w_c,
@@ -2777,6 +2779,7 @@ private:
         }
         double m       = 0.5 * (a + c);
         double std_dev = std::sqrt((c - m) * (m - a) / (c - a));
+        auto rng = r->clone();
         rng->manual_seed(node_seed);
         auto z   = sd::Tensor<float>::randn(shape_, rng);
         auto w_m = 0.5f * (w_a + w_c) + static_cast<float>(std_dev) * z;
@@ -2784,14 +2787,14 @@ private:
             return w_m;
         }
         if (t < m) {
-            return bridge(a, m, w_a, w_m, t, mix64(node_seed, 1), depth - 1);
+            return bridge(r, a, m, w_a, w_m, t, mix64(node_seed, 1), depth - 1);
         }
-        return bridge(m, c, w_m, w_c, t, mix64(node_seed, 2), depth - 1);
+        return bridge(r, m, c, w_m, w_c, t, mix64(node_seed, 2), depth - 1);
     }
 
     double t_min_;
     double t_max_;
-    std::shared_ptr<RNG> rng;
+    const std::shared_ptr<RNG> app_wide_rng;
     std::vector<int64_t> shape_;
     uint64_t root_seed_;
     sd::Tensor<float> w_at_tmax_;
@@ -2801,27 +2804,26 @@ private:
 static std::unique_ptr<NoiseSampler> make_noise_sampler(const sd::Tensor<float>& x, std::shared_ptr<RNG> rng, sample_method_t method, const std::vector<float>& sigmas, const SamplerExtraArgs& extra_args) {
     bool brownian_tree     = (method == DPMPP2M_SDE_BT_SAMPLE_METHOD);
     bool def_brownian_tree = brownian_tree;
-    std::shared_ptr<RNG> r = rng;
+    int bt_rng_type = STD_DEFAULT_RNG;  // int instead of enum because of RNG_TYPE_COUNT + 1
 
     for (const auto& [key, value] : extra_args) {
         if (key == "noise_sampler") {
             if (value == "iid") {
-                brownian_tree = false;  // setting both for the case when
-                r             = rng;    // the key is repeated several times
-            } else if (value == "brownian_tree" || value == "brownian_tree_std") {
+                brownian_tree = false;
+            } else if (value == "brownian_tree") {
                 brownian_tree = true;
-                r             = std::make_shared<STDDefaultRNG>();
-            } else if (value == "brownian_tree_cpu") {
-                brownian_tree = true;
-                r             = std::make_shared<MT19937RNG>();
-            } else if (value == "brownian_tree_cuda") {
-                brownian_tree = true;
-                r             = std::make_shared<PhiloxRNG>();
-            } else if (value == "brownian_tree_sampler_rng") {
-                brownian_tree = true;
-                r             = rng;
             } else {
                 LOG_WARN("unknown noise_sampler value '%s'; using default", value.c_str());
+            }
+        }
+        if (key == "brownian_tree_rng") {
+            if (value == "sampler_rng") {
+                bt_rng_type = RNG_TYPE_COUNT + 1;
+            } else {
+                bt_rng_type = str_to_rng_type(value.c_str());
+                if (bt_rng_type == RNG_TYPE_COUNT) {
+                    LOG_WARN("invalid '%s' type '%s'; using std_default", key.c_str(), value.c_str());
+                }
             }
         }
     }
@@ -2840,6 +2842,18 @@ static std::unique_ptr<NoiseSampler> make_noise_sampler(const sd::Tensor<float>&
             uint64_t tree_seed = 0;
             auto draw          = rng->randn(2);
             std::memcpy(&tree_seed, draw.data(), sizeof(tree_seed));
+
+            std::shared_ptr<RNG> r;
+            switch(bt_rng_type) {
+                case RNG_TYPE_COUNT + 1:
+                    r = rng;
+                    break;
+                case RNG_TYPE_COUNT:
+                    r = get_rng(STD_DEFAULT_RNG);
+                    break;
+                default:
+                    r = get_rng((rng_type_t) bt_rng_type);
+            }
             if (!def_brownian_tree) {
                 LOG_INFO("setting noise sampler to Brownian tree (%s)", r->rn());
             }
@@ -2850,7 +2864,7 @@ static std::unique_ptr<NoiseSampler> make_noise_sampler(const sd::Tensor<float>&
     if (def_brownian_tree) {
         LOG_INFO("setting noise sampler to independent and identically distributed (iid)");
     }
-    return std::make_unique<IIDGaussianNoiseSampler>(x, std::move(r));
+    return std::make_unique<IIDGaussianNoiseSampler>(x, rng);
 }
 
 // k diffusion reverse ODE: dx = (x - D(x;\sigma)) / \sigma dt; \sigma(t) = t
