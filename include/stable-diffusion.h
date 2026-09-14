@@ -464,7 +464,7 @@ SD_API bool sd_ctx_has_control_net(const sd_ctx_t* sd_ctx);
 SD_API const char* sd_type_name(enum sd_type_t type);
 SD_API enum sd_type_t str_to_sd_type(const char* str);
 SD_API const char* sd_rng_type_name(enum rng_type_t rng_type);
-extern SD_API enum rng_type_t str_to_rng_type(const char* str);
+SD_API enum rng_type_t str_to_rng_type(const char* str);
 SD_API const char* sd_sample_method_name(enum sample_method_t sample_method);
 SD_API enum sample_method_t str_to_sample_method(const char* str);
 SD_API const char* sd_scheduler_name(enum scheduler_t scheduler);
