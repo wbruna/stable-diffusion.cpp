@@ -654,16 +654,6 @@ public:
         return false;
     }
 
-    std::shared_ptr<RNG> get_rng(rng_type_t rng_type) {
-        if (rng_type == STD_DEFAULT_RNG) {
-            return std::make_shared<STDDefaultRNG>();
-        } else if (rng_type == CPU_RNG) {
-            return std::make_shared<MT19937RNG>();
-        } else {  // default: CUDA_RNG
-            return std::make_shared<PhiloxRNG>();
-        }
-    }
-
     void refresh_compvis_denoiser_sigmas() {
         auto comp_vis_denoiser = std::dynamic_pointer_cast<CompVisDenoiser>(denoiser);
         if (!comp_vis_denoiser) {
@@ -3300,6 +3290,16 @@ enum rng_type_t str_to_rng_type(const char* str) {
         }
     }
     return RNG_TYPE_COUNT;
+}
+
+std::shared_ptr<RNG> get_rng(rng_type_t rng_type) {
+    if (rng_type == STD_DEFAULT_RNG) {
+        return std::make_shared<STDDefaultRNG>();
+    } else if (rng_type == CPU_RNG) {
+        return std::make_shared<MT19937RNG>();
+    } else {  // default: CUDA_RNG
+        return std::make_shared<PhiloxRNG>();
+    }
 }
 
 const char* sample_method_to_str[] = {
