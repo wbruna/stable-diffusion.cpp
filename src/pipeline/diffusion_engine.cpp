@@ -863,8 +863,10 @@ bool StableDiffusionGGML::init(const sd_ctx_params_t* sd_ctx_params) {
             return false;
         }
     }
-    auto configuration        = std::make_unique<ModelConfig>(*sd_ctx_params);
-    n_threads                 = sd_ctx_params->n_threads;
+    auto configuration = std::make_unique<ModelConfig>(*sd_ctx_params);
+    n_threads          = sd_ctx_params->n_threads;
+    tensor_executor    = std::make_unique<sd::ParallelExecutor>(n_threads > 0 ? n_threads : sd_get_num_physical_cores());
+    sd::ParallelScope tensor_scope(tensor_executor.get());
     enable_mmap               = sd_ctx_params->enable_mmap;
     disable_prefetch          = sd_ctx_params->disable_prefetch;
     disable_segmented_compute = sd_ctx_params->disable_segmented_compute;
@@ -2158,6 +2160,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
 
     RunnerEndOnExit sample_control_runner_end{!control_image.empty() && control_net != nullptr ? control_net.get() : nullptr};
 
+    const bool apply_denoise_mask = !denoise_mask.empty() &&
+                                    std::any_of(denoise_mask.values().begin(), denoise_mask.values().end(),
+                                                [](float value) { return value != 1.f; });
+
     std::vector<int> skip_layers(guidance.slg.layers, guidance.slg.layers + guidance.slg.layer_count);
     float cfg_scale     = guidance.txt_cfg;
     float img_cfg_scale = guidance.img_cfg;
@@ -2287,13 +2293,13 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
             hunyuan_timestep_r_tensor = sd::Tensor<float>::from_vector({sigmas[step + 1]});
         }
         sd::Tensor<float> noised_input = x * c_in;
-        if (!denoise_mask.empty() && (version == VERSION_WAN2_2_TI2V || sd_version_is_ltxav(version) || sd_version_is_lingbot_video(version))) {
+        if (apply_denoise_mask && (version == VERSION_WAN2_2_TI2V || sd_version_is_ltxav(version) || sd_version_is_lingbot_video(version))) {
             noised_input = noised_input * denoise_mask + sampling_init_latent * (1.0f - denoise_mask);
         }
 
         if (cache_runtime.spectrum_enabled && cache_runtime.spectrum.should_predict()) {
             cache_runtime.spectrum.predict(&denoised);
-            if (!denoise_mask.empty()) {
+            if (apply_denoise_mask) {
                 denoised = denoised * denoise_mask + sampling_init_latent * (1.0f - denoise_mask);
             }
             if (preview_needed && sd_should_preview_denoised()) {
@@ -2516,7 +2522,7 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
         if (cache_runtime.spectrum_enabled) {
             cache_runtime.spectrum.update(denoised);
         }
-        if (!denoise_mask.empty()) {
+        if (apply_denoise_mask) {
             denoised = denoised * denoise_mask + sampling_init_latent * (1.0f - denoise_mask);
         }
         if (preview_needed && sd_should_preview_denoised()) {
