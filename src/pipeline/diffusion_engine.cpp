@@ -1152,7 +1152,7 @@ bool StableDiffusionGGML::init(const sd_ctx_params_t* sd_ctx_params) {
         sampler_rng = rng;
     }
 
-    ggml_log_set(sd_ggml_log_callback, nullptr);
+    kcpp_sd_ggml_log_set();
 
     model_manager = std::make_shared<ModelManager>();
     model_manager->set_n_threads(n_threads);
