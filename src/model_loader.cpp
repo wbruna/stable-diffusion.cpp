@@ -36,10 +36,8 @@
 
 /*================================================= Preprocess ==================================================*/
 
-#if !KCPP_MAINLINE_FP8_SCALED
+#ifdef SD_USE_UPSTREAM_GGML
 uint16_t f8_e4m3_to_f16(uint8_t f8) {
-    // do we need to support uz?
-
     const uint32_t exponent_bias = 7;
     if (f8 == 0xff) {
         return ggml_fp32_to_fp16(-NAN);
@@ -512,6 +510,9 @@ SDVersion ModelLoader::get_sd_version() const {
         if (tensor_storage.name.find("language_model.model.layers.0.self_attn.q_proj_mot_gen.weight") != std::string::npos) {
             return VERSION_SENSENOVA_U1_5;
         }
+        if (tensor_storage.name == "model.diffusion_model.txt_in.text_norm.weight") {
+            return VERSION_QWEN_IMAGE_2_1;
+        }
         if (tensor_storage.name.find("model.diffusion_model.transformer_blocks.0.img_mod.1.weight") != std::string::npos) {
             auto img_in = tensor_storage_map.find("model.diffusion_model.img_in.weight");
             if (img_in != tensor_storage_map.end() && img_in->second.ne[0] == 128) {
@@ -947,10 +948,10 @@ std::vector<MmapTensorStore> ModelLoader::mmap_tensors(std::map<std::string, ggm
 
             if (tensor_storage.is_f64 ||
                 tensor_storage.is_i64 ||
-                #if !KCPP_MAINLINE_FP8_SCALED
+#ifdef SD_USE_UPSTREAM_GGML
                 tensor_storage.is_f8_e4m3 ||
                 tensor_storage.is_f8_e5m2 ||
-                #endif
+#endif
                 tensor_storage.kcpp_ext ||
                 tensor_storage.type != dst_tensor->type) {
                 continue;
@@ -1276,6 +1277,12 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb,
                         f64_to_f32_vec((double*)read_buf, (float*)target_buf, tensor_storage.nelements());
                     } else if (tensor_storage.is_i64) {
                         i64_to_i32_vec((int64_t*)read_buf, (int32_t*)target_buf, tensor_storage.nelements());
+#ifdef SD_USE_UPSTREAM_GGML
+                    } else if (tensor_storage.is_f8_e4m3) {
+                        f8_e4m3_to_f16_vec((uint8_t*)read_buf, (uint16_t*)target_buf, tensor_storage.nelements());
+                    } else if (tensor_storage.is_f8_e5m2) {
+                        f8_e5m2_to_f16_vec((uint8_t*)read_buf, (uint16_t*)target_buf, tensor_storage.nelements());
+#endif
                     }
                     if (tensor_storage.type != dst_tensor->type) {
                         if (convert_buf == nullptr) {
