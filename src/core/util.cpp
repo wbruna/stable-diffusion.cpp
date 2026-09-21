@@ -62,17 +62,34 @@ void replace_all_chars(std::string& str, char target, char replacement) {
     }
 }
 
+static std::string sd_vformat(const char* fmt, va_list ap) {
+    char small[128];
+    va_list ap2;
+    va_copy(ap2, ap);
+    int size = vsnprintf(small, sizeof small, fmt, ap);
+    if (size < 0) {
+        va_end(ap2);
+        return {};
+    }
+    size_t needed = (size_t)size;
+    if (needed < sizeof small) {
+        va_end(ap2);
+        return std::string(small, needed);
+    }
+    std::string out(needed, '\0');
+    int size2 = vsnprintf(out.data(), needed + 1, fmt, ap2);
+    va_end(ap2);
+    if (size2 < 0)
+        out.clear();
+    return out;
+}
+
 std::string sd_format(const char* fmt, ...) {
     va_list ap;
-    va_list ap2;
     va_start(ap, fmt);
-    va_copy(ap2, ap);
-    int size = vsnprintf(nullptr, 0, fmt, ap);
-    std::vector<char> buf(size + 1);
-    int size2 = vsnprintf(buf.data(), size + 1, fmt, ap2);
-    va_end(ap2);
+    std::string result = sd_vformat(fmt, ap);
     va_end(ap);
-    return std::string(buf.data(), size);
+    return result;
 }
 
 int round_up_to(int value, int base) {
@@ -414,12 +431,41 @@ std::vector<std::string> split_string(const std::string& str, char delimiter) {
 }
 
 ggml_type sd_type_to_ggml_type(sd_type_t sdtype) {
+    if (sdtype == SD_TYPE_F8_E4M3 || sdtype == SD_TYPE_F8_E5M2) {
+#ifndef SD_USE_UPSTREAM_GGML
+        return sdtype == SD_TYPE_F8_E4M3 ? GGML_TYPE_F8_E4M3 : GGML_TYPE_F8_E5M2;
+#else
+        return GGML_TYPE_COUNT;
+#endif
+    }
     const int type_value = static_cast<int>(sdtype);
-    if (type_value < std::min<int>(SD_TYPE_COUNT, GGML_TYPE_COUNT)) {
+    if (type_value >= 0 && type_value < std::min<int>(SD_TYPE_COUNT, GGML_TYPE_COUNT)) {
         return static_cast<ggml_type>(type_value);
     } else {
         return GGML_TYPE_COUNT;
     }
+}
+
+bool validate_tensor_types(sd_type_t type, const char* tensor_type_rules) {
+    if (type != SD_TYPE_COUNT && sd_type_to_ggml_type(type) == GGML_TYPE_COUNT) {
+        LOG_ERROR("weight type %s is not supported by this ggml build", sd_type_name(type));
+        return false;
+    }
+#ifdef SD_USE_UPSTREAM_GGML
+    for (const auto& rule : split_string(SAFE_STR(tensor_type_rules), ',')) {
+        const auto pos = rule.find('=');
+        if (pos != std::string::npos) {
+            const auto name = rule.substr(pos + 1);
+            if (name == "f8_e4m3" || name == "f8_e5m2") {
+                LOG_ERROR("FP8 is not supported by this ggml build (tensor type rule '%s')", rule.c_str());
+                return false;
+            }
+        }
+    }
+#else
+    GGML_UNUSED(tensor_type_rules);
+#endif
+    return true;
 }
 
 KeyValueArgs parse_key_value_args(const char* args, const char* context) {
@@ -595,47 +641,45 @@ std::string trim(const std::string& s) {
 static sd_log_cb_t sd_log_cb = nullptr;
 void* sd_log_cb_data         = nullptr;
 
-#define LOG_BUFFER_SIZE 4096
+static void sd_log_dispatch(sd_log_level_t level, const std::string& origin, const std::string& text) {
+    if (sd_log_cb == nullptr)
+        return;
+    std::string message = origin + " - " + text;
+    if (message.back() != '\n') {
+        message += '\n';
+    }
+    sd_log_cb(level, message.c_str(), sd_log_cb_data);
+}
 
 void log_printf(sd_log_level_t level, const char* file, int line, const char* format, ...) {
     va_list args;
     va_start(args, format);
-
-    static char log_buffer[LOG_BUFFER_SIZE + 1];
-    int written = snprintf(log_buffer, LOG_BUFFER_SIZE, "%s:%-4d - ", sd_basename(file).c_str(), line);
-
-    if (written >= 0 && written < LOG_BUFFER_SIZE) {
-        vsnprintf(log_buffer + written, LOG_BUFFER_SIZE - written, format, args);
-    }
-    size_t len = strlen(log_buffer);
-    if (log_buffer[len - 1] != '\n') {
-        strncat(log_buffer, "\n", LOG_BUFFER_SIZE - len);
-    }
-
-    if (sd_log_cb) {
-        sd_log_cb(level, log_buffer, sd_log_cb_data);
-    }
-
+    std::string message = sd_vformat(format, args);
     va_end(args);
+    std::string origin = sd_format("%s:%-4d", sd_basename(file).c_str(), line);
+    sd_log_dispatch(level, origin, message);
 }
 
 void sd_ggml_log_callback(ggml_log_level level, const char* text, void*) {
+    sd_log_level_t sd_level = SD_LOG_VERBOSE;
     switch (level) {
         case GGML_LOG_LEVEL_DEBUG:
-            LOG_VERBOSE(text);
+            sd_level = SD_LOG_VERBOSE;
             break;
         case GGML_LOG_LEVEL_INFO:
-            LOG_INFO(text);
+            sd_level = SD_LOG_INFO;
             break;
         case GGML_LOG_LEVEL_WARN:
-            LOG_WARN(text);
+            sd_level = SD_LOG_WARN;
             break;
         case GGML_LOG_LEVEL_ERROR:
-            LOG_ERROR(text);
+            sd_level = SD_LOG_ERROR;
             break;
         default:
-            LOG_VERBOSE(text);
+            sd_level = SD_LOG_VERBOSE;
+            break;
     }
+    sd_log_dispatch(sd_level, "ggml", text);
 }
 
 void sd_set_log_callback(sd_log_cb_t cb, void* data) {
