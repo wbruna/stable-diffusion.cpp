@@ -244,6 +244,7 @@ bool read_safetensors_file(const std::string& file_path,
             return false;
         }
 #ifdef SD_USE_UPSTREAM_GGML
+        if (1) {} else // kcpp: INT8 tensorwise/convrot is converted to F16 by the fallback below.
         if (config.format == "int8_tensorwise") {
             set_error(error, "INT8 tensorwise/convrot is not supported by this ggml build (tensor '" + name + "')");
             return false;
