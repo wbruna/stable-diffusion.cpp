@@ -115,7 +115,7 @@ void convert_tensor(void* src,
                     ggml_type dst_type,
                     int nrows,
                     int n_per_row,
-                    std::vector<float> imatrix = {}) {
+                    std::vector<float> imatrix) {
     int n = nrows * n_per_row;
     if (src_type == dst_type) {
         size_t nbytes = n * ggml_type_size(src_type) / ggml_blck_size(src_type);
@@ -526,6 +526,9 @@ SDVersion ModelLoader::get_sd_version() const {
         if (tensor_storage.name.find("model.diffusion_model.cap_embedder.0.weight") != std::string::npos) {
             if (tensor_storage_map.find("text_encoders.llm.connector.layers.0.self_attn.q_proj.weight") != tensor_storage_map.end()) {
                 return VERSION_MING_IMAGE;
+            }
+            if (tensor_storage_map.find("model.diffusion_model.local_decoder.out_conv.weight") != tensor_storage_map.end()) {
+                return VERSION_Z_IMAGE_L2P;
             }
             return VERSION_Z_IMAGE;
         }
