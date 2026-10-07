@@ -428,16 +428,6 @@ bool ModelLoader::init_from_torch_zip_file(const std::string& file_path, const s
     return true;
 }
 
-bool ModelLoader::has_diffusion_model_tensors()
-{
-    for (auto& [name, tensor_storage] : tensor_storage_map) {
-        if (tensor_storage.name.find("model.diffusion_model.") != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
-}
-
 /*================================================= DiffusersModelLoader ==================================================*/
 
 bool ModelLoader::init_from_diffusers_file(const std::string& file_path, const std::string& prefix) {
@@ -551,6 +541,11 @@ SDVersion ModelLoader::get_sd_version() const {
             return VERSION_LLADA_IMAGE;
         }
         if (tensor_storage.name.find("model.diffusion_model.cap_embedder.0.weight") != std::string::npos) {
+            //kcpp do not rely on the text encoder for Ming-Image detection
+            if (tensor_storage_map.find("model.diffusion_model.cap_pad_token") == tensor_storage_map.end()) {
+                return VERSION_MING_IMAGE;
+            }
+            //kcpp
             if (tensor_storage_map.find("text_encoders.llm.connector.layers.0.self_attn.q_proj.weight") != tensor_storage_map.end()) {
                 return VERSION_MING_IMAGE;
             }
