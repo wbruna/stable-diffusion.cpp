@@ -4,6 +4,7 @@
 #include <cinttypes>
 #include <cstdarg>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <mutex>
@@ -205,7 +206,7 @@ void ModelLoader::set_n_threads(int n_threads) {
 }
 
 bool ModelLoader::init_from_file(const std::string& file_path, const std::string& prefix) {
-    return add_file(sd_get_u8path(file_path), prefix);
+    return add_file(file_path, prefix);
 }
 
 bool ModelLoader::parse_file(const std::string& file_path, const std::string& prefix) {
@@ -350,7 +351,7 @@ bool ModelLoader::init_from_safetensors_index_file(const std::string& file_path,
         }
     }
 
-    std::ifstream index_file(file_path);
+    std::ifstream index_file(std::filesystem::u8path(file_path));
     const auto index = nlohmann::json::parse(index_file);
     for (const auto& entry : index.at("weight_map").items()) {
         const auto expected = (std::filesystem::u8path(file_path).parent_path() /
@@ -1173,7 +1174,7 @@ bool ModelLoader::load_tensors(on_new_tensor_cb_t on_new_tensor_cb,
                         return;
                     }
                 } else if (!mmapped) {
-                    file.open(file_path, std::ios::binary);
+                    file.open(std::filesystem::u8path(file_path), std::ios::binary);
                     if (!file.is_open()) {
                         LOG_ERROR("failed to open '%s'", file_path.c_str());
                         failed = true;
