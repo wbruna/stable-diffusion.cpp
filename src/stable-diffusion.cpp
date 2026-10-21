@@ -845,7 +845,7 @@ namespace kcpp_sd {
         res.is_ltx = sd_version_is_ltxav(loadedsdver);
         res.is_minimaxh3 = sd_version_is_minimax_h3(loadedsdver);
         res.is_boogu = sd_version_is_boogu_image(loadedsdver);
-        res.supports_ref_image = sd_version_supports_ref_latent_img_cfg(loadedsdver) || sd_version_is_pid(loadedsdver) || res.is_qwenimg;
+        res.supports_ref_image = sd_version_supports_ref_image_conditioning(loadedsdver);
         res.vae_scale_factor = ctx->sd->get_vae_scale_factor();
         res.spatial_multiple = get_spatial_multiple(ctx);
         return res;
