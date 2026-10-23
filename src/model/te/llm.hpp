@@ -387,6 +387,7 @@ namespace LLM {
                 config.num_heads = 16;
             }
             if (arch == LLMArch::QWEN3_5) {
+                config.vision.arch  = LLMVisionArch::QWEN3_VL;
                 config.qwen35_gguf  = tensor_storage_map.count(prefix + ".model.layers.0.linear_attn.A") > 0;
                 config.rms_norm_add = !config.qwen35_gguf;
                 for (const auto& [name, tensor] : tensor_storage_map) {
