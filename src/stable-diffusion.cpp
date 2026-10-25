@@ -806,10 +806,6 @@ SD_API void free_sd_images(sd_image_t* result_images, int num_images) {
 
 namespace kcpp_sd {
 
-    int get_loaded_sd_version(sd_ctx_t* ctx) {
-        return ctx->sd->version;
-    }
-
     bool loaded_model_is_chroma(sd_ctx_t* ctx) {
         if (ctx != nullptr && ctx->sd != nullptr) {
             auto maybe_flux = std::dynamic_pointer_cast<Flux::FluxRunner>(ctx->sd->diffusion_model);
@@ -820,31 +816,14 @@ namespace kcpp_sd {
         return false;
     }
 
-    int get_spatial_multiple(sd_ctx_t* ctx) {
-        return ctx->sd->get_vae_scale_factor() * ctx->sd->get_diffusion_model_down_factor();
-    }
-
-    model_info get_model_info(sd_ctx_t* ctx)
+    sd_model_info sd_get_model_info(sd_ctx_t* ctx)
     {
-        model_info res = {};
-        SDVersion loadedsdver = (SDVersion)get_loaded_sd_version(ctx);
-        res.is_wan = (loadedsdver == SDVersion::VERSION_WAN2 || loadedsdver == SDVersion::VERSION_WAN2_2_I2V || loadedsdver == SDVersion::VERSION_WAN2_2_TI2V);
-        res.is_qwenimg = sd_version_is_qwen_image(loadedsdver);
+        sd_model_info res = {};
+        res.version = ctx->sd->version;
         res.is_chroma = loaded_model_is_chroma(ctx);
-        res.is_kontext = (loadedsdver==SDVersion::VERSION_FLUX && !res.is_chroma);
-        res.is_flux2 = (loadedsdver == SDVersion::VERSION_FLUX2 || loadedsdver == SDVersion::VERSION_FLUX2_KLEIN);
-        res.is_flux1 = (loadedsdver == SDVersion::VERSION_FLUX);
-        res.is_zimage = (loadedsdver == SDVersion::VERSION_Z_IMAGE);
-        res.is_sdxs = (loadedsdver == SDVersion::VERSION_SDXS_512_DS || loadedsdver == SDVersion::VERSION_SDXS_09);
-        res.is_sd1 = (loadedsdver == SDVersion::VERSION_SD1);
-        res.is_sd2 = (loadedsdver == SDVersion::VERSION_SD2);
-        res.is_sdxl = sd_version_is_sdxl(loadedsdver);
-        res.is_ltx = sd_version_is_ltxav(loadedsdver);
-        res.is_minimaxh3 = sd_version_is_minimax_h3(loadedsdver);
-        res.is_boogu = sd_version_is_boogu_image(loadedsdver);
-        res.supports_ref_image = sd_version_supports_ref_image_conditioning(loadedsdver);
         res.vae_scale_factor = ctx->sd->get_vae_scale_factor();
-        res.spatial_multiple = get_spatial_multiple(ctx);
+        int diffusion_model_down_factor = ctx->sd->get_diffusion_model_down_factor();
+        res.spatial_multiple = res.vae_scale_factor * diffusion_model_down_factor;
         return res;
     }
 
